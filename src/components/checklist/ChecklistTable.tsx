@@ -1,7 +1,7 @@
 'use client'
 
-import { useState } from 'react'
-import type { ChecklistEntry } from '@/lib/types'
+import { useState, useEffect } from 'react'
+import type { ChecklistEntry, ChecklistPpeItem } from '@/lib/types'
 import {
   MoreHorizontal, Pencil, Trash2,
   ArrowUp, ArrowDown, ArrowUpDown, HardHat, Check, X, CheckCircle2, AlertTriangle
@@ -10,27 +10,45 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
-import { getContractorAlcRisk, isAlcoholPassed, isAlcoholFailed, isAlcoholUnchecked } from '@/lib/types'
+import { getContractorAlcRisk, isAlcoholPassed, isAlcoholFailed, isAlcoholUnchecked, DEFAULT_CHECKLIST_PPE_ITEMS } from '@/lib/types'
+import { formatDateDisplay } from '@/lib/utils'
 
-/* ── PPE Compact Dots with Labels ── */
-const PPECompact = ({ entry }: { entry: ChecklistEntry }) => {
-  const items = [
-    { label: 'หมวก', v: entry.ppe_helmet, icon: '⛑' },
-    { label: 'กั๊ก', v: entry.ppe_vest, icon: '🦺' },
-    { label: 'แว่นตา', v: entry.ppe_shirt, icon: '🥽' },
-    { label: 'ถุงมือ', v: entry.ppe_gloves, icon: '🧤' },
-    { label: 'รองเท้า', v: entry.ppe_shoes, icon: '👢' },
-  ]
+/* ── PPE Compact Dots with Dynamic Labels ── */
+const PPECompact = ({ entry, ppeConfig }: { entry: ChecklistEntry; ppeConfig: ChecklistPpeItem[] }) => {
+  let details: Record<string, boolean> | null = null
+  try {
+    if (entry.notes) {
+      const parsed = JSON.parse(entry.notes)
+      if (parsed?.ppe_details && typeof parsed.ppe_details === 'object') {
+        details = parsed.ppe_details
+      }
+    }
+  } catch {}
+
+  const activeItems = ppeConfig.filter(i => i.is_active)
+  const items = (activeItems.length > 0 ? activeItems : DEFAULT_CHECKLIST_PPE_ITEMS).map(it => {
+    let passed = false
+    if (details && typeof details[it.id] === 'boolean') {
+      passed = details[it.id]
+    } else if (it.id === 'helmet') passed = !!entry.ppe_helmet
+    else if (it.id === 'vest') passed = !!entry.ppe_vest
+    else if (it.id === 'glasses' || it.id === 'shirt') passed = !!entry.ppe_shirt
+    else if (it.id === 'gloves') passed = !!entry.ppe_gloves
+    else if (it.id === 'shoes') passed = !!entry.ppe_shoes
+    return { ...it, v: passed }
+  })
+
   const pass = items.filter(i => i.v).length
+  const total = items.length
 
   return (
     <div className="flex items-center gap-1.5 justify-center">
       <div className="flex items-center gap-0.5">
         {items.map((i, idx) => (
           <span
-            key={idx}
+            key={i.id || idx}
             title={`${i.label}: ${i.v ? 'ผ่าน' : 'ไม่ผ่าน'}`}
-            className={`w-4 h-4 rounded-full flex items-center justify-center text-xs font-normal ${
+            className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-normal ${
               i.v
                 ? 'bg-emerald-600 text-white'
                 : 'bg-slate-300 text-slate-600'
@@ -42,14 +60,14 @@ const PPECompact = ({ entry }: { entry: ChecklistEntry }) => {
       </div>
       <span
         className={`text-xs font-normal font-mono px-1.5 py-0.5 rounded border ${
-          pass === 5
+          pass === total
             ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
-            : pass >= 3
+            : pass >= Math.ceil(total / 2)
             ? 'bg-amber-100 text-amber-900 border-amber-300'
             : 'bg-red-100 text-red-900 border-red-300'
         }`}
       >
-        {pass}/5
+        {pass}/{total}
       </span>
     </div>
   )
@@ -67,6 +85,18 @@ interface ChecklistTableProps {
 export function ChecklistTable({ entries, loading, onDelete, showDate = false }: ChecklistTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('contractor_name')
   const [asc, setAsc] = useState(true)
+  const [ppeConfig, setPpeConfig] = useState<ChecklistPpeItem[]>(DEFAULT_CHECKLIST_PPE_ITEMS)
+
+  useEffect(() => {
+    fetch(`/api/settings?id=checklist_ppe_items&t=${Date.now()}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(json => {
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+          setPpeConfig(json.data)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setAsc(v => !v)
@@ -163,7 +193,7 @@ export function ChecklistTable({ entries, loading, onDelete, showDate = false }:
                   {/* Date (if showDate) */}
                   {showDate && (
                     <td className="py-1.5 px-2 text-center text-slate-900 font-mono font-normal text-xs border-r border-slate-200 whitespace-nowrap">
-                      {e.entry_date}
+                      {formatDateDisplay(e.entry_date)}
                     </td>
                   )}
 
@@ -225,7 +255,7 @@ export function ChecklistTable({ entries, loading, onDelete, showDate = false }:
 
                   {/* PPE */}
                   <td className="py-1.5 px-2 text-center border-r border-slate-200">
-                    <PPECompact entry={e} />
+                    <PPECompact entry={e} ppeConfig={ppeConfig} />
                   </td>
 
                   {/* Wage */}

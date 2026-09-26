@@ -27,25 +27,19 @@ export default function HistoryPage() {
 
   const fetchEntries = useCallback(async () => {
     setLoading(true)
-    let query = supabase
-      .from('checklist_entries')
-      .select('*')
-      .gte('entry_date', dateFrom)
-      .lte('entry_date', dateTo)
-      .order('entry_date', { ascending: false })
-      .order('created_at', { ascending: false })
-
-    if (search) {
-      query = query.or(
-        `contractor_name.ilike.%${search}%,company_name.ilike.%${search}%,activity_name.ilike.%${search}%`
-      )
+    try {
+      const params = new URLSearchParams({ from: dateFrom, to: dateTo })
+      if (search.trim()) params.set('search', search.trim())
+      const res = await fetch(`/api/checklist?${params.toString()}`)
+      const json = await res.json()
+      if (json.error) throw new Error(json.error)
+      setEntries(json.data ?? [])
+    } catch {
+      toast.error('โหลดข้อมูลไม่สำเร็จ')
+    } finally {
+      setLoading(false)
     }
-
-    const { data, error } = await query
-    if (error) toast.error('โหลดข้อมูลไม่สำเร็จ')
-    else setEntries(data ?? [])
-    setLoading(false)
-  }, [supabase, dateFrom, dateTo, search])
+  }, [dateFrom, dateTo, search])
 
   useEffect(() => { fetchEntries() }, [fetchEntries])
 

@@ -1,135 +1,180 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getNotificationConfig } from '@/lib/settings-store'
 
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const {
       message,
-      channelAccessToken,
-      targetId,
-      broadcast = false,
-      notifyToken,
-      webhookUrl,
+      flex,
     } = body
 
-    if (!message && !body.flex) {
+    if (!message && !flex) {
       return NextResponse.json({ error: 'Message content is required' }, { status: 400 })
     }
 
+    // Load saved config from Supabase / Store as baseline
+    const savedConfig = await getNotificationConfig().catch(() => null)
+
+    // Determine LINE OA parameters
+    const lineEnabled = body.line_enabled ?? body.lineEnabled ?? savedConfig?.line_enabled ?? true
+    const channelToken =
+      body.line_channel_access_token ||
+      body.channelAccessToken ||
+      savedConfig?.line_channel_access_token ||
+      process.env.LINE_CHANNEL_ACCESS_TOKEN ||
+      ''
+    const targetId =
+      body.line_target_id !== undefined
+        ? body.line_target_id
+        : body.targetId !== undefined
+        ? body.targetId
+        : savedConfig?.line_target_id || process.env.LINE_TARGET_ID || ''
+    const broadcast =
+      body.line_broadcast ?? body.broadcast ?? savedConfig?.line_broadcast ?? false
+
+    // Determine Telegram parameters
+    const telegramEnabled =
+      body.telegram_enabled ?? body.telegramEnabled ?? savedConfig?.telegram_enabled ?? false
+    const telegramBotToken =
+      body.telegram_bot_token ||
+      body.telegramBotToken ||
+      savedConfig?.telegram_bot_token ||
+      process.env.TELEGRAM_BOT_TOKEN ||
+      ''
+    const telegramChatId =
+      body.telegram_chat_id ||
+      body.telegramChatId ||
+      savedConfig?.telegram_chat_id ||
+      process.env.TELEGRAM_CHAT_ID ||
+      ''
+
     const results: Record<string, any> = {}
+    let dispatchedAny = false
 
-    // 1. LINE Notify (if token provided)
-    if (notifyToken) {
+    // 1. Send to Telegram if enabled and configured
+    if (telegramEnabled && telegramBotToken && telegramChatId) {
+      dispatchedAny = true
       try {
-        const formData = new URLSearchParams()
-        formData.append('message', message)
-        const notifyRes = await fetch('https://notify-api.line.me/api/notify', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            Authorization: `Bearer ${notifyToken}`,
-          },
-          body: formData.toString(),
-        })
-        const notifyData = await notifyRes.json()
-        results.notify = notifyData
-      } catch (err: any) {
-        results.notifyError = err.message
-      }
-    }
-
-    // 2. Custom Webhook (if provided)
-    if (webhookUrl) {
-      try {
-        const hookRes = await fetch(webhookUrl, {
+        const tgRes = await fetch(`https://api.telegram.org/bot${telegramBotToken}/sendMessage`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message, ...body }),
-        })
-        results.webhook = { status: hookRes.status, ok: hookRes.ok }
-      } catch (err: any) {
-        results.webhookError = err.message
-      }
-    }
-
-    // 3. LINE Official Account Messaging API (Push / Broadcast)
-    const token = channelAccessToken || process.env.LINE_CHANNEL_ACCESS_TOKEN
-    if (token) {
-      const messages = body.flex
-        ? [body.flex]
-        : [{ type: 'text', text: message }]
-
-      if (broadcast || !targetId) {
-        // Broadcast to all followers / friends
-        const broadcastRes = await fetch('https://api.line.me/v2/bot/message/broadcast', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ messages }),
-        })
-        const broadcastData = await broadcastRes.json().catch(() => ({}))
-        results.lineOA = {
-          type: 'broadcast',
-          status: broadcastRes.status,
-          ok: broadcastRes.ok,
-          data: broadcastData,
-        }
-      } else {
-        // Push message to specific user / group
-        const pushRes = await fetch('https://api.line.me/v2/bot/message/push', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`,
-          },
           body: JSON.stringify({
-            to: targetId,
-            messages,
+            chat_id: telegramChatId,
+            text: message,
           }),
         })
-        const pushData = await pushRes.json().catch(() => ({}))
-        results.lineOA = {
-          type: 'push',
-          status: pushRes.status,
-          ok: pushRes.ok,
-          data: pushData,
+        const tgData = await tgRes.json().catch(() => ({}))
+        results.telegram = {
+          ok: tgRes.ok && tgData.ok === true,
+          status: tgRes.status,
+          data: tgData,
+        }
+      } catch (err: any) {
+        results.telegram = {
+          ok: false,
+          error: err.message || 'Failed to connect to Telegram API',
         }
       }
     }
 
-    // If no provider succeeded or configured
-    if (!token && !notifyToken && !webhookUrl) {
+    // 2. Send to LINE OA Messaging API if enabled and configured
+    if (lineEnabled && channelToken) {
+      dispatchedAny = true
+      try {
+        const messages = flex
+          ? [flex]
+          : [{ type: 'text', text: message }]
+
+        if (broadcast || !targetId) {
+          // Broadcast to all followers
+          const broadcastRes = await fetch('https://api.line.me/v2/bot/message/broadcast', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${channelToken}`,
+            },
+            body: JSON.stringify({ messages }),
+          })
+          const broadcastData = await broadcastRes.json().catch(() => ({}))
+          results.lineOA = {
+            type: 'broadcast',
+            status: broadcastRes.status,
+            ok: broadcastRes.ok,
+            data: broadcastData,
+          }
+        } else {
+          // Push message to specific user / group
+          const pushRes = await fetch('https://api.line.me/v2/bot/message/push', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${channelToken}`,
+            },
+            body: JSON.stringify({
+              to: targetId,
+              messages,
+            }),
+          })
+          const pushData = await pushRes.json().catch(() => ({}))
+          results.lineOA = {
+            type: 'push',
+            status: pushRes.status,
+            ok: pushRes.ok,
+            data: pushData,
+          }
+        }
+      } catch (err: any) {
+        results.lineOA = {
+          ok: false,
+          error: err.message || 'Failed to connect to LINE API',
+        }
+      }
+    }
+
+    if (!dispatchedAny) {
       return NextResponse.json(
         {
-          error: 'กรุณาระบุ Channel Access Token หรือ LINE Notify Token ในการตั้งค่า',
+          error: 'ไม่มีช่องทางการแจ้งเตือนที่เปิดใช้งานหรือไม่ได้ระบุ Token (กรุณาเปิดใช้งาน LINE OA หรือ Telegram ในหน้าตั้งค่า)',
           results,
         },
         { status: 400 }
       )
     }
 
-    const isSuccess =
-      (results.lineOA && results.lineOA.ok) ||
-      (results.notify && results.notify.status === 200) ||
-      (results.webhook && results.webhook.ok)
+    // Check overall outcome
+    const lineSuccess = !lineEnabled || (results.lineOA && results.lineOA.ok)
+    const tgSuccess = !telegramEnabled || (results.telegram && results.telegram.ok)
 
-    if (!isSuccess && results.lineOA && !results.lineOA.ok) {
-      const errMsg = results.lineOA.data?.message || 'ส่งข้อความผ่าน LINE OA ไม่สำเร็จ ตรวจสอบ Token หรือ Target ID'
+    const isAnySuccess =
+      (results.lineOA && results.lineOA.ok) ||
+      (results.telegram && results.telegram.ok)
+
+    if (!isAnySuccess) {
+      let errMsg = 'ส่งข้อความไม่สำเร็จ'
+      if (results.lineOA && !results.lineOA.ok) {
+        errMsg = `LINE OA: ${results.lineOA.data?.message || results.lineOA.error || 'ส่งไม่สำเร็จ'}`
+      } else if (results.telegram && !results.telegram.ok) {
+        errMsg = `Telegram: ${results.telegram.data?.description || results.telegram.error || 'ส่งไม่สำเร็จ'}`
+      }
       return NextResponse.json({ error: errMsg, results }, { status: 400 })
     }
 
+    const channelNames: string[] = []
+    if (results.lineOA?.ok) channelNames.push('LINE OA')
+    if (results.telegram?.ok) channelNames.push('Telegram')
+
     return NextResponse.json({
       success: true,
-      message: 'ส่งการแจ้งเตือนไปยัง LINE เรียบร้อยแล้ว',
+      message: `ส่งการแจ้งเตือนไปยัง ${channelNames.join(' และ ')} เรียบร้อยแล้ว`,
       results,
     })
   } catch (error: any) {
-    console.error('LINE notification error:', error)
+    console.error('Notification send error:', error)
     return NextResponse.json(
       { error: error.message || 'เกิดข้อผิดพลาดในการส่งข้อความ' },
       { status: 500 }
     )
   }
 }
+

@@ -4,8 +4,8 @@ import { useState, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import type { ChecklistEntryFormData, Contractor, Activity } from '@/lib/types'
-import { isAlcoholFailed, isAlcoholPassed, isAlcoholUnchecked, normalizeAlcForDb } from '@/lib/types'
+import type { ChecklistEntryFormData, Contractor, Activity, ChecklistPpeItem } from '@/lib/types'
+import { isAlcoholFailed, isAlcoholPassed, isAlcoholUnchecked, normalizeAlcForDb, DEFAULT_CHECKLIST_PPE_ITEMS } from '@/lib/types'
 import { format } from 'date-fns'
 
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import Link from 'next/link'
 import { PURPOSE_PRESETS } from './QuickTeamChecklist'
+import { extractUserNote } from '@/lib/utils'
 
 interface EntryFormProps {
   entryId?: string
@@ -66,6 +67,26 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
   const [loading, setLoading] = useState(false)
   const [loadingData, setLoadingData] = useState(true)
 
+  // Dynamic PPE Items from Settings
+  const [ppeConfigItems, setPpeConfigItems] = useState<ChecklistPpeItem[]>(DEFAULT_CHECKLIST_PPE_ITEMS)
+  const [ppeDetails, setPpeDetails] = useState<Record<string, boolean>>({})
+
+  useEffect(() => {
+    fetch(`/api/settings?id=checklist_ppe_items&t=${Date.now()}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(json => {
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+          setPpeConfigItems(json.data)
+        }
+      })
+      .catch(() => {})
+  }, [])
+
+  const activePpeItems = useMemo(() => {
+    const active = ppeConfigItems.filter(i => i.is_active)
+    return active.length > 0 ? active : DEFAULT_CHECKLIST_PPE_ITEMS
+  }, [ppeConfigItems])
+
   // Load master data
   useEffect(() => {
     const loadData = async () => {
@@ -78,12 +99,21 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
 
       // Load existing entry if editing
       if (entryId) {
-        const { data: entry } = await supabase
-          .from('checklist_entries')
-          .select('*')
-          .eq('id', entryId)
-          .maybeSingle()
+        const res = await fetch(`/api/checklist/${entryId}`)
+        const json = await res.json()
+        const entry = json.data
         if (entry) {
+          let loadedPpeDetails: Record<string, boolean> = {}
+          try {
+            if (entry.notes) {
+              const parsed = JSON.parse(entry.notes)
+              if (parsed?.ppe_details && typeof parsed.ppe_details === 'object') {
+                loadedPpeDetails = parsed.ppe_details
+              }
+            }
+          } catch {}
+          setPpeDetails(loadedPpeDetails)
+
           setEntryDate(entry.entry_date)
           setFormData({
             contractor_id: entry.contractor_id ?? undefined,
@@ -108,7 +138,7 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
             noise_area: entry.noise_area,
             daily_wage: entry.daily_wage,
             meal_allowance: entry.meal_allowance,
-            notes: entry.notes ?? '',
+            notes: extractUserNote(entry.notes),
           })
         }
       }
@@ -150,16 +180,28 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
     }
   }
 
+  const allChecked = activePpeItems.length > 0 && activePpeItems.every(item => {
+    if (typeof ppeDetails[item.id] === 'boolean') return ppeDetails[item.id]
+    if (item.id === 'helmet') return !!formData.ppe_helmet
+    if (item.id === 'vest') return !!formData.ppe_vest
+    if (item.id === 'glasses' || item.id === 'shirt') return !!formData.ppe_shirt
+    if (item.id === 'gloves') return !!formData.ppe_gloves
+    if (item.id === 'shoes') return !!formData.ppe_shoes
+    return false
+  })
+
   const handleCheckAllPPE = () => {
-    const allChecked = formData.ppe_helmet && formData.ppe_vest && formData.ppe_shirt &&
-                       formData.ppe_gloves && formData.ppe_shoes
+    const nextVal = !allChecked
+    const updated: Record<string, boolean> = {}
+    activePpeItems.forEach(it => { updated[it.id] = nextVal })
+    setPpeDetails(updated)
     setFormData(prev => ({
       ...prev,
-      ppe_helmet: !allChecked,
-      ppe_vest: !allChecked,
-      ppe_shirt: !allChecked,
-      ppe_gloves: !allChecked,
-      ppe_shoes: !allChecked,
+      ppe_helmet: nextVal,
+      ppe_vest: nextVal,
+      ppe_shirt: nextVal,
+      ppe_gloves: nextVal,
+      ppe_shoes: nextVal,
     }))
   }
 
@@ -171,10 +213,39 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
     }
     setLoading(true)
 
+    const finalPpeDetails: Record<string, boolean> = {}
+    activePpeItems.forEach(it => {
+      if (typeof ppeDetails[it.id] === 'boolean') {
+        finalPpeDetails[it.id] = ppeDetails[it.id]
+      } else if (it.id === 'helmet') finalPpeDetails[it.id] = !!formData.ppe_helmet
+      else if (it.id === 'vest') finalPpeDetails[it.id] = !!formData.ppe_vest
+      else if (it.id === 'glasses' || it.id === 'shirt') finalPpeDetails[it.id] = !!formData.ppe_shirt
+      else if (it.id === 'gloves') finalPpeDetails[it.id] = !!formData.ppe_gloves
+      else if (it.id === 'shoes') finalPpeDetails[it.id] = !!formData.ppe_shoes
+      else finalPpeDetails[it.id] = false
+    })
+
+    let notesStr: string | null = null
+    try {
+      const cleanUserNote = extractUserNote(formData.notes)
+      notesStr = JSON.stringify({
+        ppe_details: finalPpeDetails,
+        ...(cleanUserNote ? { user_note: cleanUserNote } : {})
+      })
+    } catch {
+      notesStr = JSON.stringify({ ppe_details: finalPpeDetails })
+    }
+
     const payload = {
       ...formData,
       entry_date: entryDate,
       alc_result: normalizeAlcForDb(formData.alc_result),
+      ppe_helmet: finalPpeDetails['helmet'] ?? !!formData.ppe_helmet,
+      ppe_vest: finalPpeDetails['vest'] ?? !!formData.ppe_vest,
+      ppe_shirt: finalPpeDetails['glasses'] ?? finalPpeDetails['shirt'] ?? !!formData.ppe_shirt,
+      ppe_gloves: finalPpeDetails['gloves'] ?? !!formData.ppe_gloves,
+      ppe_shoes: finalPpeDetails['shoes'] ?? !!formData.ppe_shoes,
+      notes: notesStr,
     }
 
     try {
@@ -199,15 +270,15 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
     setLoading(false)
   }
 
-  const ppeFields = [
-    { key: 'ppe_helmet' as const, label: '⛑ หมวก' },
-    { key: 'ppe_vest' as const, label: '🦺 เสื้อกั๊ก' },
-    { key: 'ppe_shirt' as const, label: '🥽 แว่นตา' },
-    { key: 'ppe_gloves' as const, label: '🧤 ถุงมือ' },
-    { key: 'ppe_shoes' as const, label: '👢 รองเท้า' },
-  ]
-
-  const ppeCount = ppeFields.filter(f => formData[f.key]).length
+  const ppeCount = activePpeItems.filter(item => {
+    if (typeof ppeDetails[item.id] === 'boolean') return ppeDetails[item.id]
+    if (item.id === 'helmet') return !!formData.ppe_helmet
+    if (item.id === 'vest') return !!formData.ppe_vest
+    if (item.id === 'glasses' || item.id === 'shirt') return !!formData.ppe_shirt
+    if (item.id === 'gloves') return !!formData.ppe_gloves
+    if (item.id === 'shoes') return !!formData.ppe_shoes
+    return false
+  }).length
 
   if (loadingData) {
     return (
@@ -516,8 +587,8 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
                 </div>
                 <div className="flex items-center gap-2">
                   <CardTitle className="text-sm font-bold text-slate-800">PPE</CardTitle>
-                  <Badge className={`text-xs font-semibold ${ppeCount === 5 ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : ppeCount >= 3 ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-rose-100 text-rose-800 border-rose-300'}`} variant="outline">
-                    {ppeCount}/5
+                  <Badge className={`text-xs font-semibold ${ppeCount === activePpeItems.length ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : ppeCount >= Math.ceil(activePpeItems.length / 2) ? 'bg-amber-100 text-amber-800 border-amber-300' : 'bg-rose-100 text-rose-800 border-rose-300'}`} variant="outline">
+                    {ppeCount}/{activePpeItems.length}
                   </Badge>
                 </div>
               </div>
@@ -526,35 +597,56 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
                 onClick={handleCheckAllPPE}
                 className="text-xs text-blue-600 hover:text-blue-800 font-semibold px-2 py-1 rounded hover:bg-blue-50 transition-colors"
               >
-                {ppeCount === 5 ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
+                {allChecked ? 'ยกเลิกทั้งหมด' : 'เลือกทั้งหมด'}
               </button>
             </CardHeader>
             <CardContent className="p-5 space-y-2">
-              {ppeFields.map(f => (
-                <label
-                  key={f.key}
-                  htmlFor={f.key}
-                  className={`flex items-center justify-between p-2.5 rounded-lg border transition-all cursor-pointer ${
-                    formData[f.key]
-                      ? 'bg-blue-50/40 border-blue-200 text-slate-900 shadow-xs'
-                      : 'bg-slate-50/60 border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300'
-                  }`}
-                >
-                  <div className="flex items-center gap-3">
-                    <Checkbox
-                      id={f.key}
-                      checked={formData[f.key]}
-                      onCheckedChange={v => setFormData(prev => ({ ...prev, [f.key]: !!v }))}
-                    />
-                    <span className="font-medium text-sm">{f.label}</span>
-                  </div>
-                  {formData[f.key] ? (
-                    <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">✓ ครบ</span>
-                  ) : (
-                    <span className="text-xs font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">✗ ไม่มี</span>
-                  )}
-                </label>
-              ))}
+              {activePpeItems.map(item => {
+                const isChecked = typeof ppeDetails[item.id] === 'boolean'
+                  ? ppeDetails[item.id]
+                  : item.id === 'helmet' ? !!formData.ppe_helmet
+                  : item.id === 'vest' ? !!formData.ppe_vest
+                  : item.id === 'glasses' || item.id === 'shirt' ? !!formData.ppe_shirt
+                  : item.id === 'gloves' ? !!formData.ppe_gloves
+                  : item.id === 'shoes' ? !!formData.ppe_shoes
+                  : false
+
+                return (
+                  <label
+                    key={item.id}
+                    className={`flex items-center justify-between p-2.5 rounded-lg border transition-all cursor-pointer ${
+                      isChecked
+                        ? 'bg-blue-50/40 border-blue-200 text-slate-900 shadow-xs'
+                        : 'bg-slate-50/60 border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Checkbox
+                        id={item.id}
+                        checked={isChecked}
+                        onCheckedChange={v => {
+                          const checked = !!v
+                          setPpeDetails(prev => ({ ...prev, [item.id]: checked }))
+                          if (item.id === 'helmet') setFormData(prev => ({ ...prev, ppe_helmet: checked }))
+                          if (item.id === 'vest') setFormData(prev => ({ ...prev, ppe_vest: checked }))
+                          if (item.id === 'glasses' || item.id === 'shirt') setFormData(prev => ({ ...prev, ppe_shirt: checked }))
+                          if (item.id === 'gloves') setFormData(prev => ({ ...prev, ppe_gloves: checked }))
+                          if (item.id === 'shoes') setFormData(prev => ({ ...prev, ppe_shoes: checked }))
+                        }}
+                      />
+                      <span className="font-medium text-sm">{item.icon} {item.label}</span>
+                      {item.required && (
+                        <span className="text-[10px] text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.2 rounded font-semibold">บังคับ</span>
+                      )}
+                    </div>
+                    {isChecked ? (
+                      <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">✓ ครบ</span>
+                    ) : (
+                      <span className="text-xs font-medium text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">✗ ไม่มี</span>
+                    )}
+                  </label>
+                )
+              })}
             </CardContent>
           </Card>
 

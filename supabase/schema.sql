@@ -83,6 +83,16 @@ ALTER TABLE public.user_profiles
   ADD COLUMN IF NOT EXISTS line_picture_url TEXT;
 
 -- ============================================================
+-- 5.1 TABLE: settings (การตั้งค่าระบบ - Dynamic JSONB)
+-- ============================================================
+CREATE TABLE IF NOT EXISTS public.settings (
+  id TEXT PRIMARY KEY,
+  data JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT timezone('utc', now()) NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT timezone('utc', now()) NOT NULL
+);
+
+-- ============================================================
 -- 6. TABLE: checklist_entries (ข้อมูล Checklist หลัก)
 -- ============================================================
 CREATE TABLE IF NOT EXISTS public.checklist_entries (
@@ -164,6 +174,7 @@ ALTER TABLE public.contractors ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.activities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.user_profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.checklist_entries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.settings ENABLE ROW LEVEL SECURITY;
 
 -- Reset policies to avoid recursion
 DROP POLICY IF EXISTS "Allow all for authenticated users" ON public.companies;
@@ -171,6 +182,7 @@ DROP POLICY IF EXISTS "Allow all for authenticated users" ON public.contractors;
 DROP POLICY IF EXISTS "Allow all for authenticated users" ON public.activities;
 DROP POLICY IF EXISTS "Allow all for authenticated users" ON public.user_profiles;
 DROP POLICY IF EXISTS "Allow all for authenticated users" ON public.checklist_entries;
+DROP POLICY IF EXISTS "Allow all for authenticated users" ON public.settings;
 
 DROP POLICY IF EXISTS "Allow anon read companies" ON public.companies;
 DROP POLICY IF EXISTS "Allow anon read contractors" ON public.contractors;
@@ -180,12 +192,14 @@ DROP POLICY IF EXISTS "Allow anon all companies" ON public.companies;
 DROP POLICY IF EXISTS "Allow anon all contractors" ON public.contractors;
 DROP POLICY IF EXISTS "Allow anon all activities" ON public.activities;
 DROP POLICY IF EXISTS "Allow anon all checklist_entries" ON public.checklist_entries;
+DROP POLICY IF EXISTS "Allow anon all settings" ON public.settings;
 
 -- สิทธิ์เข้าถึงข้อมูลสำหรับแอปพลิเคชัน
 CREATE POLICY "Allow anon all companies" ON public.companies FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "Allow anon all contractors" ON public.contractors FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "Allow anon all activities" ON public.activities FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "Allow anon all checklist_entries" ON public.checklist_entries FOR ALL TO anon USING (true) WITH CHECK (true);
+CREATE POLICY "Allow anon all settings" ON public.settings FOR ALL TO anon USING (true) WITH CHECK (true);
 CREATE POLICY "Allow anon read user_profiles" ON public.user_profiles FOR SELECT TO anon USING (true);
 
 -- Authenticated fallback

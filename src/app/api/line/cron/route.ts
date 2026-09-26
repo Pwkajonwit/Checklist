@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { getNotificationConfig } from '@/lib/settings-store'
 import { format } from 'date-fns'
 import {
   buildDailyReportData,
@@ -10,8 +11,8 @@ import {
 export const dynamic = 'force-dynamic'
 
 /**
- * Endpoint สำหรับ Vercel Cron หรือ External Cron / Webhook
- * เรียก GET หรือ POST เพื่อให้ระบบดึงข้อมูลวันนี้และส่งสรุปเข้า LINE OA อัตโนมัติ
+ * Endpoint สำหรับ Supabase pg_cron / Edge Functions / Vercel Cron / Webhook
+ * เรียก GET หรือ POST เพื่อให้ระบบดึงข้อมูลวันนี้และส่งสรุปเข้า LINE OA & Telegram อัตโนมัติ
  */
 export async function GET(req: NextRequest) {
   return handleCronSend(req)
@@ -23,20 +24,19 @@ export async function POST(req: NextRequest) {
 
 async function handleCronSend(req: NextRequest) {
   try {
+    const config = await getNotificationConfig()
+
     const { searchParams } = new URL(req.url)
     const secret = searchParams.get('secret') || req.headers.get('x-cron-secret')
-    const expectedSecret = process.env.CRON_SECRET || 'sitecheck-cron-secret'
+    const expectedSecret = config.cron_secret || process.env.CRON_SECRET || 'sitecheck-cron-secret'
 
-    // Verify secret if CRON_SECRET is configured
-    if (process.env.CRON_SECRET && secret !== expectedSecret) {
+    // Verify secret if provided or configured
+    if (expectedSecret && secret !== expectedSecret) {
       return NextResponse.json({ error: 'Unauthorized secret' }, { status: 401 })
     }
 
     const todayStr = format(new Date(), 'yyyy-MM-dd')
-    const formatMode = searchParams.get('mode') || 'flex' // 'flex' or 'text'
-    const targetId = searchParams.get('targetId') || process.env.LINE_TARGET_ID
-    const channelToken = process.env.LINE_CHANNEL_ACCESS_TOKEN
-    const notifyToken = process.env.LINE_NOTIFY_TOKEN
+    const formatMode = searchParams.get('mode') || config.schedule_mode || 'flex' // 'flex' or 'text'
 
     // Query today's data from Supabase
     const supabase = await createClient()
@@ -59,17 +59,20 @@ async function handleCronSend(req: NextRequest) {
     const textMsg = formatDailyLineMessage(report)
     const flexPayload = buildDailyLineFlexMessage(report)
 
-    // Dispatch message
+    // Dispatch message via /api/line/send
     const sendRes = await fetch(`${req.nextUrl.origin}/api/line/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message: textMsg,
         flex: formatMode === 'flex' ? flexPayload : undefined,
-        channelAccessToken: channelToken,
-        targetId: targetId,
-        broadcast: !targetId,
-        notifyToken: notifyToken,
+        line_enabled: config.line_enabled,
+        line_channel_access_token: config.line_channel_access_token,
+        line_target_id: config.line_target_id,
+        line_broadcast: config.line_broadcast,
+        telegram_enabled: config.telegram_enabled,
+        telegram_bot_token: config.telegram_bot_token,
+        telegram_chat_id: config.telegram_chat_id,
       }),
     })
 
@@ -87,7 +90,7 @@ async function handleCronSend(req: NextRequest) {
         totalMissing: report.totalMissing,
         branchesCount: report.companies.length,
       },
-      lineResult: sendData,
+      results: sendData,
     })
   } catch (error: any) {
     console.error('CRON send error:', error)
@@ -97,3 +100,4 @@ async function handleCronSend(req: NextRequest) {
     )
   }
 }
+

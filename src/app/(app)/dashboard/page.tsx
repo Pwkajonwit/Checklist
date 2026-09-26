@@ -1,4 +1,4 @@
-import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 import {
@@ -10,7 +10,7 @@ import Link from 'next/link'
 import { isAlcoholFailed } from '@/lib/types'
 
 async function getDashboardData(today: string) {
-  const supabase = await createClient()
+  const supabase = createServiceClient()
   const { data: entries } = await supabase
     .from('checklist_entries')
     .select('*')

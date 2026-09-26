@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { ChecklistEntry, Contractor, Company, Activity, ALCResult } from '@/lib/types'
-import { getContractorAlcRisk, getContractorDailyWage, isAlcoholPassed, isAlcoholFailed, isAlcoholUnchecked, normalizeAlcForDb } from '@/lib/types'
+import type { ChecklistEntry, Contractor, Company, Activity, ALCResult, ChecklistPpeItem } from '@/lib/types'
+import { getContractorAlcRisk, getContractorDailyWage, isAlcoholPassed, isAlcoholFailed, isAlcoholUnchecked, normalizeAlcForDb, DEFAULT_CHECKLIST_PPE_ITEMS } from '@/lib/types'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import {
@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { cleanContractorPosition } from '@/lib/types'
+import { extractUserNote } from '@/lib/utils'
 
 // รายการระบบงานหลัก สำหรับคลิกเลือกด่วน หรือแสดงในดรอปดาวน์
 const COMMON_TASK_PRESETS = [
@@ -38,10 +39,7 @@ export const PURPOSE_PRESETS = [
   'ขอเข้า 09:00',
   'ขอเข้า 09:30',
   'ขอเข้า 10:00',
-  'ขอออกก่อนเวลา (16:00)',
-  'ขอทำงานล่วงเวลา (OT ถึง 20:00)',
-  'ขอทำงานกะดึก',
-  'เข้าปฏิบัติงานตามปกติ',
+  ,
 ]
 
 interface QuickTeamChecklistProps {
@@ -57,6 +55,7 @@ interface RowChecklistState {
   ppe_shirt: boolean
   ppe_gloves: boolean
   ppe_shoes: boolean
+  ppe_details?: Record<string, boolean>
   activity_id?: string
   activity_name?: string
   supervisor?: string
@@ -74,6 +73,84 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
   const [loading, setLoading] = useState(true)
   const [savingRowId, setSavingRowId] = useState<string | null>(null)
   const [savingAll, setSavingAll] = useState(false)
+
+  // ── Dynamic Checklist PPE Items ──
+  const [ppeConfigItems, setPpeConfigItems] = useState<ChecklistPpeItem[]>(DEFAULT_CHECKLIST_PPE_ITEMS)
+
+  const loadPpeSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings?id=checklist_ppe_items')
+      const json = await res.json()
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        setPpeConfigItems(json.data)
+      }
+    } catch { }
+  }, [])
+
+  useEffect(() => {
+    loadPpeSettings()
+  }, [loadPpeSettings])
+
+  const activePpeItems = useMemo(() => {
+    const active = ppeConfigItems.filter(i => i.is_active)
+    return active.length > 0 ? active : DEFAULT_CHECKLIST_PPE_ITEMS
+  }, [ppeConfigItems])
+
+  const getRowPpeValue = useCallback((st: RowChecklistState, itemId: string): boolean => {
+    if (st.ppe_details && typeof st.ppe_details[itemId] === 'boolean') {
+      return st.ppe_details[itemId]
+    }
+    if (itemId === 'helmet') return !!st.ppe_helmet
+    if (itemId === 'vest') return !!st.ppe_vest
+    if (itemId === 'glasses' || itemId === 'shirt') return !!st.ppe_shirt
+    if (itemId === 'gloves') return !!st.ppe_gloves
+    if (itemId === 'shoes') return !!st.ppe_shoes
+    return false
+  }, [])
+
+  const updateRowPpeValue = useCallback((contractorId: string, itemId: string, val: boolean) => {
+    setRowStates(prev => {
+      const cur = prev[contractorId] || {
+        alc_result: '',
+        ppe_helmet: false,
+        ppe_vest: false,
+        ppe_shirt: false,
+        ppe_gloves: false,
+        ppe_shoes: false,
+      }
+      const curDetails = cur.ppe_details || {
+        helmet: !!cur.ppe_helmet,
+        vest: !!cur.ppe_vest,
+        glasses: !!cur.ppe_shirt,
+        shirt: !!cur.ppe_shirt,
+        gloves: !!cur.ppe_gloves,
+        shoes: !!cur.ppe_shoes,
+      }
+      const nextDetails = { ...curDetails, [itemId]: val }
+      const updates: Partial<RowChecklistState> = { ppe_details: nextDetails }
+      if (itemId === 'helmet') updates.ppe_helmet = val
+      if (itemId === 'vest') updates.ppe_vest = val
+      if (itemId === 'glasses' || itemId === 'shirt') updates.ppe_shirt = val
+      if (itemId === 'gloves') updates.ppe_gloves = val
+      if (itemId === 'shoes') updates.ppe_shoes = val
+
+      return {
+        ...prev,
+        [contractorId]: { ...cur, ...updates },
+      }
+    })
+  }, [])
+
+  const getRowPpePassedCount = useCallback((st: RowChecklistState): number => {
+    return activePpeItems.filter(it => getRowPpeValue(st, it.id)).length
+  }, [activePpeItems, getRowPpeValue])
+
+  const isRowAllPpePassed = useCallback((st: RowChecklistState): boolean => {
+    return activePpeItems.every(it => {
+      if (!it.required) return true
+      return getRowPpeValue(st, it.id)
+    })
+  }, [activePpeItems, getRowPpeValue])
 
   // Filtering
   const [selectedCompany, setSelectedCompany] = useState<string>('all')
@@ -109,6 +186,25 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
   useEffect(() => {
     const fetchSupervisor = async () => {
       try {
+        // 1. Try session from /api/auth/me (Current Login Session)
+        const res = await fetch('/api/auth/me')
+        if (res.ok) {
+          const authData = await res.json()
+          if (authData.success && authData.user) {
+            const sName =
+              authData.user.full_name?.trim() ||
+              authData.user.email?.trim() ||
+              authData.user.phone?.trim() ||
+              ''
+            if (sName) {
+              setCurrentUserSupervisor(sName)
+              setDefaultSupervisor(prev => prev || sName)
+              return
+            }
+          }
+        }
+
+        // 2. Fallback to Supabase Auth
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
           const { data: profile } = await supabase
@@ -122,10 +218,27 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
             setDefaultSupervisor(prev => prev || sName)
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
     fetchSupervisor()
   }, [supabase])
+
+  // Sync default supervisor to empty rows
+  useEffect(() => {
+    if (defaultSupervisor) {
+      setRowStates(prev => {
+        let changed = false
+        const next = { ...prev }
+        Object.keys(next).forEach(id => {
+          if (!next[id]?.supervisor) {
+            next[id] = { ...next[id], supervisor: defaultSupervisor }
+            changed = true
+          }
+        })
+        return changed ? next : prev
+      })
+    }
+  }, [defaultSupervisor])
 
   // Row states
   const [rowStates, setRowStates] = useState<Record<string, RowChecklistState>>({})
@@ -201,6 +314,16 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       )
 
       if (entry) {
+        let details: Record<string, boolean> | undefined = undefined
+        try {
+          if (entry.notes) {
+            const parsed = JSON.parse(entry.notes)
+            if (parsed?.ppe_details && typeof parsed.ppe_details === 'object') {
+              details = parsed.ppe_details
+            }
+          }
+        } catch { }
+
         newStates[c.id] = {
           alc_result: entry.alc_result,
           ppe_helmet: entry.ppe_helmet ?? false,
@@ -208,11 +331,13 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           ppe_shirt: entry.ppe_shirt ?? false,
           ppe_gloves: entry.ppe_gloves ?? false,
           ppe_shoes: entry.ppe_shoes ?? false,
+          ppe_details: details,
+          supervisor: entry.supervisor ?? defaultSupervisor ?? currentUserSupervisor ?? undefined,
           activity_id: entry.activity_id ?? undefined,
           activity_name: entry.activity_name ?? undefined,
           purpose: entry.purpose ?? undefined,
           location: entry.location ?? undefined,
-          notes: entry.notes ?? undefined,
+          notes: extractUserNote(entry.notes) || undefined,
         }
       } else {
         newStates[c.id] = newStates[c.id] || {
@@ -222,6 +347,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           ppe_shirt: false,
           ppe_gloves: false,
           ppe_shoes: false,
+          supervisor: defaultSupervisor || currentUserSupervisor || undefined,
           activity_id: defaultActivityId || undefined,
           activity_name: defaultActivityName || undefined,
           location: defaultLocation || undefined,
@@ -230,7 +356,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
     })
 
     setRowStates(prev => ({ ...newStates, ...prev }))
-  }, [contractors, entries, defaultActivityId, defaultActivityName, defaultLocation])
+  }, [contractors, entries, defaultActivityId, defaultActivityName, defaultLocation, defaultSupervisor, currentUserSupervisor])
 
   // Affiliation summary for LEFT COLUMN
   const affiliationList = useMemo(() => {
@@ -308,6 +434,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
         ppe_shirt: false,
         ppe_gloves: false,
         ppe_shoes: false,
+        supervisor: defaultSupervisor || currentUserSupervisor || undefined,
         activity_id: defaultActivityId || undefined,
         activity_name: defaultActivityName || undefined,
         location: defaultLocation || undefined,
@@ -324,6 +451,10 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
         ppe_shirt: false,
         ppe_gloves: false,
         ppe_shoes: false,
+        supervisor: defaultSupervisor || currentUserSupervisor || undefined,
+        activity_id: defaultActivityId || undefined,
+        activity_name: defaultActivityName || undefined,
+        location: defaultLocation || undefined,
       }
       return {
         ...prev,
@@ -335,9 +466,13 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
   // Toggle row PPE
   const togglePassAllRow = (contractorId: string) => {
     const cur = getRowState(contractorId)
-    const isAllPass =
-      cur.ppe_helmet && cur.ppe_vest && cur.ppe_shirt && cur.ppe_gloves && cur.ppe_shoes && isAlcoholPassed(cur.alc_result)
+    const isAllPass = isRowAllPpePassed(cur) && isAlcoholPassed(cur.alc_result)
     const targetState = !isAllPass
+
+    const nextDetails: Record<string, boolean> = {}
+    activePpeItems.forEach(it => {
+      nextDetails[it.id] = targetState
+    })
 
     updateRow(contractorId, {
       alc_result: targetState ? '0' : '',
@@ -346,14 +481,13 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       ppe_shirt: targetState,
       ppe_gloves: targetState,
       ppe_shoes: targetState,
+      ppe_details: nextDetails,
     })
   }
 
   // Bulk column toggles
-  const bulkToggleColumn = (
-    key: 'ppe_helmet' | 'ppe_vest' | 'ppe_shirt' | 'ppe_gloves' | 'ppe_shoes'
-  ) => {
-    const allCurrentTrue = currentTeamMembers.every(c => getRowState(c.id)[key])
+  const bulkToggleColumn = (itemId: string) => {
+    const allCurrentTrue = currentTeamMembers.every(c => getRowPpeValue(getRowState(c.id), itemId))
     const nextVal = !allCurrentTrue
 
     setRowStates(prev => {
@@ -367,7 +501,23 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           ppe_gloves: false,
           ppe_shoes: false,
         }
-        updated[c.id] = { ...cur, [key]: nextVal }
+        const curDetails = cur.ppe_details || {
+          helmet: !!cur.ppe_helmet,
+          vest: !!cur.ppe_vest,
+          glasses: !!cur.ppe_shirt,
+          shirt: !!cur.ppe_shirt,
+          gloves: !!cur.ppe_gloves,
+          shoes: !!cur.ppe_shoes,
+        }
+        const nextDetails = { ...curDetails, [itemId]: nextVal }
+        const patch: Partial<RowChecklistState> = { ppe_details: nextDetails }
+        if (itemId === 'helmet') patch.ppe_helmet = nextVal
+        if (itemId === 'vest') patch.ppe_vest = nextVal
+        if (itemId === 'glasses' || itemId === 'shirt') patch.ppe_shirt = nextVal
+        if (itemId === 'gloves') patch.ppe_gloves = nextVal
+        if (itemId === 'shoes') patch.ppe_shoes = nextVal
+
+        updated[c.id] = { ...cur, ...patch }
       })
       return updated
     })
@@ -395,6 +545,11 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
   }
 
   const handlePassAllTeam = () => {
+    const nextDetails: Record<string, boolean> = {}
+    activePpeItems.forEach(it => {
+      nextDetails[it.id] = true
+    })
+
     setRowStates(prev => {
       const updated = { ...prev }
       currentTeamMembers.forEach(c => {
@@ -407,6 +562,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           ppe_shirt: true,
           ppe_gloves: true,
           ppe_shoes: true,
+          ppe_details: nextDetails,
           activity_id: cur.activity_id || defaultActivityId || undefined,
           activity_name: cur.activity_name || defaultActivityName || undefined,
           location: cur.location || defaultLocation || undefined,
@@ -431,6 +587,22 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
 
     const memberWage = getContractorDailyWage(contractor)
 
+    const ppeDetails: Record<string, boolean> = {}
+    activePpeItems.forEach(it => {
+      ppeDetails[it.id] = getRowPpeValue(st, it.id)
+    })
+
+    let notesStr: string | null = null
+    try {
+      const cleanUserNote = extractUserNote(st.notes) || extractUserNote(existingEntry?.notes)
+      notesStr = JSON.stringify({
+        ppe_details: ppeDetails,
+        ...(cleanUserNote ? { user_note: cleanUserNote } : {})
+      })
+    } catch {
+      notesStr = JSON.stringify({ ppe_details: ppeDetails })
+    }
+
     const payload = {
       entry_date: date,
       contractor_id: contractor.id || null,
@@ -444,16 +616,16 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       check_in_time: (defaultCheckIn || '').trim() || null,
       check_out_time: (defaultCheckOut || '').trim() || null,
       alc_result: normalizeAlcForDb(st.alc_result),
-      ppe_helmet: !!st.ppe_helmet,
-      ppe_vest: !!st.ppe_vest,
-      ppe_shirt: !!st.ppe_shirt,
-      ppe_gloves: !!st.ppe_gloves,
-      ppe_shoes: !!st.ppe_shoes,
+      ppe_helmet: ppeDetails['helmet'] ?? !!st.ppe_helmet,
+      ppe_vest: ppeDetails['vest'] ?? !!st.ppe_vest,
+      ppe_shirt: ppeDetails['glasses'] ?? ppeDetails['shirt'] ?? !!st.ppe_shirt,
+      ppe_gloves: ppeDetails['gloves'] ?? !!st.ppe_gloves,
+      ppe_shoes: ppeDetails['shoes'] ?? !!st.ppe_shoes,
       daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
       status: 'active' as const,
       is_blacklisted: false,
       meal_allowance: false,
-      notes: (st.notes || '').trim() || null,
+      notes: notesStr,
     }
 
     try {
@@ -506,6 +678,23 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
         const st = getRowState(c.id)
         const existingEntry = getEntryForContractor(c)
         const memberWage = getContractorDailyWage(c)
+
+        const ppeDetails: Record<string, boolean> = {}
+        activePpeItems.forEach(it => {
+          ppeDetails[it.id] = getRowPpeValue(st, it.id)
+        })
+
+        let notesStr: string | null = null
+        try {
+          const cleanUserNote = extractUserNote(st.notes) || extractUserNote(existingEntry?.notes)
+          notesStr = JSON.stringify({
+            ppe_details: ppeDetails,
+            ...(cleanUserNote ? { user_note: cleanUserNote } : {})
+          })
+        } catch {
+          notesStr = JSON.stringify({ ppe_details: ppeDetails })
+        }
+
         const payload = {
           entry_date: date,
           contractor_id: c.id || null,
@@ -519,16 +708,16 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           check_in_time: (defaultCheckIn || '').trim() || null,
           check_out_time: (defaultCheckOut || '').trim() || null,
           alc_result: normalizeAlcForDb(st.alc_result),
-          ppe_helmet: !!st.ppe_helmet,
-          ppe_vest: !!st.ppe_vest,
-          ppe_shirt: !!st.ppe_shirt,
-          ppe_gloves: !!st.ppe_gloves,
-          ppe_shoes: !!st.ppe_shoes,
+          ppe_helmet: ppeDetails['helmet'] ?? !!st.ppe_helmet,
+          ppe_vest: ppeDetails['vest'] ?? !!st.ppe_vest,
+          ppe_shirt: ppeDetails['glasses'] ?? ppeDetails['shirt'] ?? !!st.ppe_shirt,
+          ppe_gloves: ppeDetails['gloves'] ?? !!st.ppe_gloves,
+          ppe_shoes: ppeDetails['shoes'] ?? !!st.ppe_shoes,
           daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
           status: 'active' as const,
           is_blacklisted: false,
           meal_allowance: false,
-          notes: (st.notes || '').trim() || null,
+          notes: notesStr,
         }
 
         if (existingEntry) {
@@ -581,8 +770,11 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
   const handleDeleteRowEntry = async (entryId: string, name: string) => {
     if (!confirm(`ต้องการยกเลิกการบันทึก Checklist ของ "${name}" ใช่หรือไม่?`)) return
     try {
-      const { error } = await supabase.from('checklist_entries').delete().eq('id', entryId)
-      if (error) throw error
+      const res = await fetch(`/api/checklist/${entryId}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.error || 'ยกเลิกไม่สำเร็จ')
+      }
       toast.info(`ยกเลิกผลการตรวจของ ${name} แล้ว`)
       onRefreshEntries()
     } catch (err: unknown) {
@@ -656,6 +848,9 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
     const existingEntry = getEntryForContractor(contractor)
     const memberWage = getContractorDailyWage(contractor)
 
+    const quickPpeDetails: Record<string, boolean> = {}
+    activePpeItems.forEach(it => { quickPpeDetails[it.id] = true })
+
     const updatedRowState: RowChecklistState = {
       ...getRowState(contractor.id),
       alc_result: '0%',
@@ -664,6 +859,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       ppe_shirt: true,
       ppe_gloves: true,
       ppe_shoes: true,
+      ppe_details: quickPpeDetails,
       activity_id: defaultActivityId || undefined,
       activity_name: defaultActivityName || undefined,
       location: defaultLocation || undefined,
@@ -683,16 +879,19 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       check_in_time: (defaultCheckIn || '').trim() || null,
       check_out_time: (defaultCheckOut || '').trim() || null,
       alc_result: '0' as ALCResult,
-      ppe_helmet: true,
-      ppe_vest: true,
-      ppe_shirt: true,
-      ppe_gloves: true,
-      ppe_shoes: true,
+      ppe_helmet: quickPpeDetails['helmet'] ?? true,
+      ppe_vest: quickPpeDetails['vest'] ?? true,
+      ppe_shirt: quickPpeDetails['glasses'] ?? quickPpeDetails['shirt'] ?? true,
+      ppe_gloves: quickPpeDetails['gloves'] ?? true,
+      ppe_shoes: quickPpeDetails['shoes'] ?? true,
       daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
       status: 'active' as const,
       is_blacklisted: false,
       meal_allowance: false,
-      notes: (updatedRowState.notes || '').trim() || null,
+      notes: JSON.stringify({
+        ppe_details: quickPpeDetails,
+        ...(extractUserNote(existingEntry?.notes) ? { user_note: extractUserNote(existingEntry?.notes) } : {}),
+      }),
     }
 
     try {
@@ -743,6 +942,9 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
 
     setSavingAll(true)
     try {
+      const defaultPpeDetails: Record<string, boolean> = {}
+      activePpeItems.forEach(it => { defaultPpeDetails[it.id] = true })
+
       const inserts = pending.map(c => {
         const row = getRowState(c.id)
         const memberWage = getContractorDailyWage(c)
@@ -768,7 +970,10 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           status: 'active' as const,
           is_blacklisted: false,
           meal_allowance: false,
-          notes: (row.notes || '').trim() || null,
+          notes: JSON.stringify({
+            ppe_details: row.ppe_details || defaultPpeDetails,
+            ...(extractUserNote(row.notes) ? { user_note: extractUserNote(row.notes) } : {}),
+          }),
         }
       })
 
@@ -1052,15 +1257,8 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                 const hasAlcRisk = getContractorAlcRisk(member)
                 const isExpanded = !!expandedDetails[member.id]
 
-                const ppePassedCount = [
-                  st.ppe_helmet,
-                  st.ppe_vest,
-                  st.ppe_shirt,
-                  st.ppe_gloves,
-                  st.ppe_shoes,
-                ].filter(Boolean).length
-
-                const isAllPpePassed = ppePassedCount === 5
+                const ppePassedCount = getRowPpePassedCount(st)
+                const isAllPpePassed = isRowAllPpePassed(st)
                 const effectiveActivityId = st.activity_id || defaultActivityId
                 const tasksForMember = getTasksForActivity(effectiveActivityId)
                 const selectedTaskValue = st.activity_name || ''
@@ -1144,7 +1342,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                           <div className="flex items-center gap-1.5 text-emerald-950 font-normal min-w-0">
                             <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
                             <span className="truncate">
-                              ผล: {isAlcoholPassed(st.alc_result) ? `ALC ${st.alc_result || '0%'}` : `ALC ${st.alc_result || '>0%'} (เกิน)`} • PPE {ppePassedCount}/5 ชิ้น
+                              ผล: {isAlcoholPassed(st.alc_result) ? `ALC ${st.alc_result || '0%'}` : `ALC ${st.alc_result || '>0%'} (เกิน)`} • PPE {ppePassedCount}/{activePpeItems.length} ชิ้น
                             </span>
                           </div>
                           <div className="flex items-center gap-1.5 shrink-0 ml-2">
@@ -1172,29 +1370,27 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                         <div>
                           <div className="text-xs font-semibold text-slate-600 mb-1.5 flex items-center justify-between">
                             <span>ผลตรวจแอลกอฮอล์</span>
-                            <span className={`text-xs font-mono px-2 py-0.5 rounded border ${
-                              isAlcoholUnchecked(st.alc_result)
-                                ? 'bg-slate-100 text-slate-700 border-slate-300'
-                                : isAlcoholPassed(st.alc_result)
+                            <span className={`text-xs font-mono px-2 py-0.5 rounded border ${isAlcoholUnchecked(st.alc_result)
+                              ? 'bg-slate-100 text-slate-700 border-slate-300'
+                              : isAlcoholPassed(st.alc_result)
                                 ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
                                 : 'bg-red-50 text-red-900 border-red-300 font-semibold'
-                            }`}>
+                              }`}>
                               {isAlcoholUnchecked(st.alc_result)
                                 ? 'ยังไม่ได้ตรวจ'
                                 : isAlcoholPassed(st.alc_result)
-                                ? `${st.alc_result} (ปกติ) ✓`
-                                : `${st.alc_result} (เกินเกณฑ์ ❌)`}
+                                  ? `${st.alc_result} (ปกติ) ✓`
+                                  : `${st.alc_result} (เกินเกณฑ์ ❌)`}
                             </span>
                           </div>
                           <div className="grid grid-cols-3 gap-1.5 mb-2">
                             <button
                               type="button"
                               onClick={() => updateRow(member.id, { alc_result: '0' })}
-                              className={`py-1.5 px-2 rounded-lg text-xs font-normal border flex items-center justify-center gap-1 transition-all ${
-                                isAlcoholPassed(st.alc_result)
-                                  ? 'bg-emerald-600 text-white font-semibold border-emerald-700 shadow-2xs'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                              }`}
+                              className={`py-1.5 px-2 rounded-lg text-xs font-normal border flex items-center justify-center gap-1 transition-all ${isAlcoholPassed(st.alc_result)
+                                ? 'bg-emerald-600 text-white font-semibold border-emerald-700 shadow-2xs'
+                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                }`}
                             >
                               <Check className="w-3.5 h-3.5" />
                               <span>0 ปกติ</span>
@@ -1202,11 +1398,10 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                             <button
                               type="button"
                               onClick={() => updateRow(member.id, { alc_result: isAlcoholFailed(st.alc_result) ? st.alc_result : '25' })}
-                              className={`py-1.5 px-2 rounded-lg text-xs font-normal border flex items-center justify-center gap-1 transition-all ${
-                                isAlcoholFailed(st.alc_result)
-                                  ? 'bg-red-600 text-white font-semibold border-red-700 shadow-2xs animate-pulse'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                              }`}
+                              className={`py-1.5 px-2 rounded-lg text-xs font-normal border flex items-center justify-center gap-1 transition-all ${isAlcoholFailed(st.alc_result)
+                                ? 'bg-red-600 text-white font-semibold border-red-700 shadow-2xs animate-pulse'
+                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                }`}
                             >
                               <AlertTriangle className="w-3.5 h-3.5" />
                               <span>&gt;0 เกิน</span>
@@ -1214,11 +1409,10 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                             <button
                               type="button"
                               onClick={() => updateRow(member.id, { alc_result: '' })}
-                              className={`py-1.5 px-2 rounded-lg text-xs font-normal border flex items-center justify-center gap-1 transition-all ${
-                                isAlcoholUnchecked(st.alc_result)
-                                  ? 'bg-slate-700 text-white font-semibold border-slate-800 shadow-2xs'
-                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                              }`}
+                              className={`py-1.5 px-2 rounded-lg text-xs font-normal border flex items-center justify-center gap-1 transition-all ${isAlcoholUnchecked(st.alc_result)
+                                ? 'bg-slate-700 text-white font-semibold border-slate-800 shadow-2xs'
+                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                                }`}
                             >
                               <span>ยังไม่ตรวจ</span>
                             </button>
@@ -1246,30 +1440,24 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                               onClick={() => togglePassAllRow(member.id)}
                               className="text-xs font-normal text-blue-700 hover:text-blue-900"
                             >
-                              {isAllPpePassed ? 'ปิดทั้งหมด' : 'ผ่านครบ 5 ชิ้น'}
+                              {isAllPpePassed ? 'ปิดทั้งหมด' : `ผ่านครบ ${activePpeItems.length} ชิ้น`}
                             </button>
                           </div>
-                          <div className="grid grid-cols-5 gap-1.5">
-                            {[
-                              { key: 'ppe_helmet' as const, label: 'หมวก', icon: '⛑️' },
-                              { key: 'ppe_vest' as const, label: 'กั๊ก', icon: '🦺' },
-                              { key: 'ppe_shirt' as const, label: 'แว่นตา', icon: '🥽' },
-                              { key: 'ppe_gloves' as const, label: 'ถุงมือ', icon: '🧤' },
-                              { key: 'ppe_shoes' as const, label: 'รองเท้า', icon: '👢' },
-                            ].map(item => {
-                              const val = st[item.key]
+                          <div className="flex flex-wrap gap-1.5">
+                            {activePpeItems.map(item => {
+                              const val = getRowPpeValue(st, item.id)
                               return (
                                 <button
-                                  key={item.key}
+                                  key={item.id}
                                   type="button"
-                                  onClick={() => updateRow(member.id, { [item.key]: !val })}
-                                  className={`flex flex-col items-center justify-center py-2 px-1 rounded-lg border text-center transition-all active:scale-95 ${val
-                                    ? 'bg-emerald-50 text-emerald-900 border-emerald-400 font-normal'
+                                  onClick={() => updateRowPpeValue(member.id, item.id, !val)}
+                                  className={`flex items-center gap-1 py-1 px-2 rounded-lg border text-center transition-all active:scale-95 ${val
+                                    ? 'bg-emerald-50 text-emerald-900 border-emerald-400 font-semibold shadow-2xs'
                                     : 'bg-slate-50 text-slate-400 border-slate-300 font-normal opacity-60'
                                     }`}
                                 >
-                                  <span className="text-base leading-none mb-1">{item.icon}</span>
-                                  <span className="text-xs font-normal leading-tight truncate w-full">{item.label}</span>
+                                  <span className="text-sm">{item.icon}</span>
+                                  <span className="text-xs">{item.label}</span>
                                 </button>
                               )
                             })}
@@ -1687,70 +1875,27 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                       </div>
                     </th>
 
-                    {/* PPE 1: หมวก */}
-                    <th className="py-1.5 px-1.5 text-center min-w-[52px] font-semibold border-r border-slate-300">
-                      <div className="flex flex-col items-center">
-                        <span>หมวก</span>
-                        <button
-                          onClick={() => bulkToggleColumn('ppe_helmet')}
-                          className="text-xs font-normal text-blue-700 hover:text-blue-900 leading-none mt-0.5"
-                        >
-                          ทั้งหมด
-                        </button>
-                      </div>
-                    </th>
-
-                    {/* PPE 2: กั๊ก */}
-                    <th className="py-1.5 px-1.5 text-center min-w-[52px] font-semibold border-r border-slate-300">
-                      <div className="flex flex-col items-center">
-                        <span>กั๊ก</span>
-                        <button
-                          onClick={() => bulkToggleColumn('ppe_vest')}
-                          className="text-xs font-normal text-blue-700 hover:text-blue-900 leading-none mt-0.5"
-                        >
-                          ทั้งหมด
-                        </button>
-                      </div>
-                    </th>
-
-                    {/* PPE 3: แว่นตา */}
-                    <th className="py-1.5 px-1.5 text-center min-w-[52px] font-semibold border-r border-slate-300">
-                      <div className="flex flex-col items-center">
-                        <span>แว่นตา</span>
-                        <button
-                          onClick={() => bulkToggleColumn('ppe_shirt')}
-                          className="text-xs font-normal text-blue-700 hover:text-blue-900 leading-none mt-0.5"
-                        >
-                          ทั้งหมด
-                        </button>
-                      </div>
-                    </th>
-
-                    {/* PPE 4: ถุงมือ */}
-                    <th className="py-1.5 px-1.5 text-center min-w-[52px] font-semibold border-r border-slate-300">
-                      <div className="flex flex-col items-center">
-                        <span>ถุงมือ</span>
-                        <button
-                          onClick={() => bulkToggleColumn('ppe_gloves')}
-                          className="text-xs font-normal text-blue-700 hover:text-blue-900 leading-none mt-0.5"
-                        >
-                          ทั้งหมด
-                        </button>
-                      </div>
-                    </th>
-
-                    {/* PPE 5: รองเท้า */}
-                    <th className="py-1.5 px-1.5 text-center min-w-[52px] font-semibold border-r border-slate-300">
-                      <div className="flex flex-col items-center">
-                        <span>รองเท้า</span>
-                        <button
-                          onClick={() => bulkToggleColumn('ppe_shoes')}
-                          className="text-xs font-normal text-blue-700 hover:text-blue-900 leading-none mt-0.5"
-                        >
-                          ทั้งหมด
-                        </button>
-                      </div>
-                    </th>
+                    {/* DYNAMIC PPE HEADERS */}
+                    {activePpeItems.map(item => (
+                      <th
+                        key={item.id}
+                        className="py-1.5 px-1.5 text-center min-w-[56px] font-semibold border-r border-slate-300"
+                      >
+                        <div className="flex flex-col items-center">
+                          <span className="truncate max-w-[70px] inline-flex items-center gap-0.5 justify-center" title={item.label}>
+                            <span>{item.icon}</span>
+                            <span>{item.label}</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => bulkToggleColumn(item.id)}
+                            className="text-xs font-normal text-blue-700 hover:text-blue-900 leading-none mt-0.5 cursor-pointer"
+                          >
+                            ทั้งหมด
+                          </button>
+                        </div>
+                      </th>
+                    ))}
 
                     {/* ผลตรวจ */}
                     <th className="py-2.5 px-2 text-center min-w-[95px] font-semibold border-r border-slate-300">ผล Checklist</th>
@@ -1774,15 +1919,8 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                       const st = getRowState(member.id)
                       const isRowSaving = savingRowId === member.id
 
-                      const ppePassedCount = [
-                        st.ppe_helmet,
-                        st.ppe_vest,
-                        st.ppe_shirt,
-                        st.ppe_gloves,
-                        st.ppe_shoes,
-                      ].filter(Boolean).length
-
-                      const isAllPpePassed = ppePassedCount === 5
+                      const ppePassedCount = getRowPpePassedCount(st)
+                      const isAllPpePassed = isRowAllPpePassed(st)
                       const isSafe = isAllPpePassed && isAlcoholPassed(st.alc_result)
 
                       const effectiveActivityId = st.activity_id || defaultActivityId
@@ -1943,13 +2081,12 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                                 value={isAlcoholUnchecked(st.alc_result) ? '' : (st.alc_result ?? '')}
                                 onChange={e => updateRow(member.id, { alc_result: e.target.value })}
                                 placeholder="ยังไม่ตรวจ"
-                                className={`w-full text-xs text-center py-1 pl-1 pr-4 rounded border font-mono transition-colors focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                                  isAlcoholUnchecked(st.alc_result)
-                                    ? 'bg-white text-slate-700 border-slate-300 placeholder:text-slate-400'
-                                    : isAlcoholPassed(st.alc_result)
+                                className={`w-full text-xs text-center py-1 pl-1 pr-4 rounded border font-mono transition-colors focus:outline-none focus:ring-1 focus:ring-blue-500 ${isAlcoholUnchecked(st.alc_result)
+                                  ? 'bg-white text-slate-700 border-slate-300 placeholder:text-slate-400'
+                                  : isAlcoholPassed(st.alc_result)
                                     ? 'bg-emerald-50 text-emerald-900 border-emerald-400 font-semibold'
                                     : 'bg-red-100 text-red-900 border-red-500 font-semibold animate-pulse'
-                                }`}
+                                  }`}
                               />
                               <datalist id={`alc-list-${member.id}`}>
                                 <option value="0" />
@@ -1976,75 +2113,25 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                             </div>
                           </td>
 
-                          {/* PPE 1: หมวก */}
-                          <td className="py-1.5 px-1 text-center border-r border-slate-200">
-                            <button
-                              type="button"
-                              onClick={() => updateRow(member.id, { ppe_helmet: !st.ppe_helmet })}
-                              className={`w-6 h-6 rounded mx-auto border flex items-center justify-center transition-all ${st.ppe_helmet
-                                ? 'bg-emerald-600 text-white border-emerald-700'
-                                : 'bg-white text-slate-300 border-slate-400 hover:border-slate-600'
-                                }`}
-                            >
-                              {st.ppe_helmet && <Check className="w-4 h-4 stroke-[3]" />}
-                            </button>
-                          </td>
-
-                          {/* PPE 2: กั๊ก */}
-                          <td className="py-1.5 px-1 text-center border-r border-slate-200">
-                            <button
-                              type="button"
-                              onClick={() => updateRow(member.id, { ppe_vest: !st.ppe_vest })}
-                              className={`w-6 h-6 rounded mx-auto border flex items-center justify-center transition-all ${st.ppe_vest
-                                ? 'bg-emerald-600 text-white border-emerald-700'
-                                : 'bg-white text-slate-300 border-slate-400 hover:border-slate-600'
-                                }`}
-                            >
-                              {st.ppe_vest && <Check className="w-4 h-4 stroke-[3]" />}
-                            </button>
-                          </td>
-
-                          {/* PPE 3: แว่นตา */}
-                          <td className="py-1.5 px-1 text-center border-r border-slate-200">
-                            <button
-                              type="button"
-                              onClick={() => updateRow(member.id, { ppe_shirt: !st.ppe_shirt })}
-                              className={`w-6 h-6 rounded mx-auto border flex items-center justify-center transition-all ${st.ppe_shirt
-                                ? 'bg-emerald-600 text-white border-emerald-700'
-                                : 'bg-white text-slate-300 border-slate-400 hover:border-slate-600'
-                                }`}
-                            >
-                              {st.ppe_shirt && <Check className="w-4 h-4 stroke-[3]" />}
-                            </button>
-                          </td>
-
-                          {/* PPE 4: ถุงมือ */}
-                          <td className="py-1.5 px-1 text-center border-r border-slate-200">
-                            <button
-                              type="button"
-                              onClick={() => updateRow(member.id, { ppe_gloves: !st.ppe_gloves })}
-                              className={`w-6 h-6 rounded mx-auto border flex items-center justify-center transition-all ${st.ppe_gloves
-                                ? 'bg-emerald-600 text-white border-emerald-700'
-                                : 'bg-white text-slate-300 border-slate-400 hover:border-slate-600'
-                                }`}
-                            >
-                              {st.ppe_gloves && <Check className="w-4 h-4 stroke-[3]" />}
-                            </button>
-                          </td>
-
-                          {/* PPE 5: รองเท้า */}
-                          <td className="py-1.5 px-1 text-center border-r border-slate-200">
-                            <button
-                              type="button"
-                              onClick={() => updateRow(member.id, { ppe_shoes: !st.ppe_shoes })}
-                              className={`w-6 h-6 rounded mx-auto border flex items-center justify-center transition-all ${st.ppe_shoes
-                                ? 'bg-emerald-600 text-white border-emerald-700'
-                                : 'bg-white text-slate-300 border-slate-400 hover:border-slate-600'
-                                }`}
-                            >
-                              {st.ppe_shoes && <Check className="w-4 h-4 stroke-[3]" />}
-                            </button>
-                          </td>
+                          {/* DYNAMIC PPE CELLS */}
+                          {activePpeItems.map(item => {
+                            const val = getRowPpeValue(st, item.id)
+                            return (
+                              <td key={item.id} className="py-1.5 px-1 text-center border-r border-slate-200">
+                                <button
+                                  type="button"
+                                  onClick={() => updateRowPpeValue(member.id, item.id, !val)}
+                                  className={`w-6 h-6 rounded mx-auto border flex items-center justify-center transition-all cursor-pointer ${val
+                                    ? 'bg-emerald-600 text-white border-emerald-700'
+                                    : 'bg-white text-slate-300 border-slate-400 hover:border-slate-600'
+                                    }`}
+                                  title={`${item.label}: ${val ? 'ผ่าน' : 'ไม่ผ่าน'}`}
+                                >
+                                  {val && <Check className="w-4 h-4 stroke-[3]" />}
+                                </button>
+                              </td>
+                            )
+                          })}
 
                           {/* ผลตรวจ (PPE ผ่านกี่ชิ้น) */}
                           <td className="py-1.5 px-2 text-center border-r border-slate-200">
@@ -2057,7 +2144,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                                 : 'bg-amber-100 text-amber-900 border-amber-400'
                                 }`}
                             >
-                              {isSafe ? '✓ ผ่านครบ' : `${ppePassedCount}/5 ไม่ครบ`}
+                              {isSafe ? '✓ ผ่านครบ' : `${ppePassedCount}/${activePpeItems.length} ไม่ครบ`}
                             </button>
                           </td>
 

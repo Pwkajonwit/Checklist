@@ -202,3 +202,53 @@ export interface DashboardStats {
   ppe_incomplete: number
   blacklisted: number
 }
+
+// ── Dynamic Checklist PPE Item Configuration ──
+export interface ChecklistPpeItem {
+  id: string          // unique key (e.g. 'helmet', 'vest', 'glasses', 'gloves', 'shoes', or custom)
+  label: string       // ชื่ออุปกรณ์ (e.g. 'หมวก', 'กั๊ก', 'แว่นตา')
+  icon: string        // emoji or icon string (e.g. '⛑️', '🦺', '🥽')
+  required: boolean   // ต้องมีเพื่อผ่านการตรวจ
+  is_active: boolean  // สถานะเปิดใช้งาน
+  sort_order: number  // ลำดับการแสดงผล
+}
+
+export const DEFAULT_CHECKLIST_PPE_ITEMS: ChecklistPpeItem[] = [
+  { id: 'helmet', label: 'หมวก', icon: '⛑️', required: true, is_active: true, sort_order: 1 },
+  { id: 'vest', label: 'กั๊ก', icon: '🦺', required: true, is_active: true, sort_order: 2 },
+  { id: 'glasses', label: 'แว่นตา', icon: '🥽', required: true, is_active: true, sort_order: 3 },
+  { id: 'gloves', label: 'ถุงมือ', icon: '🧤', required: true, is_active: true, sort_order: 4 },
+  { id: 'shoes', label: 'รองเท้า', icon: '👢', required: true, is_active: true, sort_order: 5 },
+]
+
+// ── Notification Configuration (LINE OA & Telegram & Schedule) ──
+export interface NotificationConfig {
+  line_enabled: boolean
+  line_channel_access_token: string
+  line_target_id: string
+  line_broadcast: boolean
+
+  telegram_enabled: boolean
+  telegram_bot_token: string
+  telegram_chat_id: string
+
+  schedule_enabled: boolean
+  schedule_times: string[]
+  schedule_mode: 'flex' | 'text'
+  cron_secret: string
+}
+
+export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
+  line_enabled: true,
+  line_channel_access_token: '',
+  line_target_id: '',
+  line_broadcast: false,
+  telegram_enabled: false,
+  telegram_bot_token: '',
+  telegram_chat_id: '',
+  schedule_enabled: true,
+  schedule_times: ['09:00', '12:00', '17:00'],
+  schedule_mode: 'flex',
+  cron_secret: 'sitecheck-cron-secret',
+}
+

@@ -14,6 +14,22 @@ function sanitizeAlcResult(val: any): string | null {
   return '0%'
 }
 
+// GET /api/checklist/[id]
+export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id } = await params
+  const supabase = createServiceClient()
+
+  const { data, error } = await supabase
+    .from('checklist_entries')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle()
+
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  if (!data) return NextResponse.json({ error: 'Entry not found' }, { status: 404 })
+  return NextResponse.json({ data })
+}
+
 // PUT /api/checklist/[id]
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params

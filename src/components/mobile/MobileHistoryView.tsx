@@ -10,6 +10,7 @@ import {
   History, Search, RefreshCw, Calendar, AlertTriangle, ShieldAlert,
   CheckCircle2, XCircle, Trash2, Clock, MapPin, HardHat
 } from 'lucide-react'
+import { extractUserNote } from '@/lib/utils'
 
 interface MobileHistoryViewProps {
   onOpenAuth?: () => void
@@ -395,12 +396,16 @@ export function MobileHistoryView({ onOpenAuth, mobileUser }: MobileHistoryViewP
                 </div>
 
                 {/* Purpose or Notes if any */}
-                {(entry.purpose || entry.notes) && (
-                  <div className="text-xs text-slate-700 font-normal bg-slate-50 px-2 py-1 rounded border border-slate-200 space-y-0.5">
-                    {entry.purpose && <p><strong className="text-slate-900 font-semibold">ความประสงค์:</strong> {entry.purpose}</p>}
-                    {entry.notes && <p><strong className="text-slate-900 font-semibold">หมายเหตุ:</strong> {entry.notes}</p>}
-                  </div>
-                )}
+                {(() => {
+                  const userNote = extractUserNote(entry.notes)
+                  if (!entry.purpose && !userNote) return null
+                  return (
+                    <div className="text-xs text-slate-700 font-normal bg-slate-50 px-2 py-1 rounded border border-slate-200 space-y-0.5">
+                      {entry.purpose && <p><strong className="text-slate-900 font-semibold">ความประสงค์:</strong> {entry.purpose}</p>}
+                      {userNote && <p><strong className="text-slate-900 font-semibold">หมายเหตุ:</strong> {userNote}</p>}
+                    </div>
+                  )
+                })()}
               </div>
             )
           })

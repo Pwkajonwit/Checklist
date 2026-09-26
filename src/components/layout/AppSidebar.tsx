@@ -8,7 +8,7 @@ import { toast } from 'sonner'
 import {
   LayoutDashboard, ClipboardCheck, History, HardHat,
   UserCheck, Layers, Building2, LogOut, ShieldCheck,
-  ChevronRight, Sparkles, Smartphone
+  ChevronRight, Sparkles, Smartphone, Sliders
 } from 'lucide-react'
 import type { UserRole } from '@/lib/types'
 
@@ -90,6 +90,14 @@ const navItems: NavItem[] = [
     roles: ['admin'],
     section: 'ข้อมูลระบบ (Master Data)',
     iconBg: 'bg-teal-50 text-teal-600 border border-teal-200/70',
+  },
+  {
+    label: 'ตั้งค่าเช็คลิสต์ PPE',
+    sublabel: 'กำหนด เพิ่ม/ลด รายการตรวจเช็ค',
+    href: '/settings',
+    icon: Sliders,
+    section: 'ข้อมูลระบบ (Master Data)',
+    iconBg: 'bg-emerald-50 text-emerald-600 border border-emerald-200/70',
   },
 ]
 

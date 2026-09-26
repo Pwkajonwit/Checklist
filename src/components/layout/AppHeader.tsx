@@ -245,23 +245,8 @@ export function AppHeader({ role, initials = '?', email = '', name = '' }: AppHe
           </DropdownMenu>
         </nav>
 
-        {/* ── Right: Notification Icon, Date & Profile Dropdown ── */}
+        {/* ── Right: Date & Profile Dropdown ── */}
         <div className="flex items-center gap-1.5 sm:gap-2 shrink-0 ml-auto">
-          {/* Notification LINE OA Icon Button (Next to Date Pill) */}
-          <Link
-            href="/line-oa"
-            className={cn(
-              'relative w-8 h-8 rounded-md flex items-center justify-center transition-all border shadow-2xs cursor-pointer',
-              pathname === '/line-oa'
-                ? 'bg-blue-600 text-white border-blue-700 shadow-xs'
-                : 'bg-white hover:bg-slate-100 text-slate-700 hover:text-slate-900 border-slate-300'
-            )}
-            title="การแจ้งเตือน LINE OA (สรุปประจำวัน)"
-          >
-            <MessageSquare className="w-4 h-4" />
-            <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-emerald-500 ring-1 ring-white" />
-          </Link>
-
           {/* Current Date Pill */}
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-slate-100 border border-slate-300 text-xs text-slate-800 font-normal">
             <CalendarDays className="w-3.5 h-3.5 text-blue-700 shrink-0" />

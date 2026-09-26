@@ -13,6 +13,8 @@ import {
   COMMON_TASK_PRESETS,
   PURPOSE_PRESETS,
   normalizeAlcForDb,
+  ChecklistPpeItem,
+  DEFAULT_CHECKLIST_PPE_ITEMS,
 } from '@/lib/types'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
@@ -23,8 +25,11 @@ import {
   XCircle, AlertTriangle, ShieldCheck, ShieldAlert, Clock,
   MapPin, Briefcase, User, Save, RefreshCw, Zap, ArrowLeft,
   Check, X, FileText, ChevronDown, Plus, Sparkles, Building2,
-  Users, CheckCircle, MessageSquare, Phone, Monitor, RotateCcw
+  Users, CheckCircle, MessageSquare, Phone, Monitor, RotateCcw,
+  Sliders
 } from 'lucide-react'
+import { PpeSettingsModal } from '@/components/checklist/PpeSettingsModal'
+import { extractUserNote } from '@/lib/utils'
 
 interface MobileChecklistMProps {
   initialDate?: string
@@ -91,6 +96,25 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
   useEffect(() => {
     const fetchSupervisor = async () => {
       try {
+        // 1. Try session from /api/auth/me (Current Login Session)
+        const res = await fetch('/api/auth/me')
+        if (res.ok) {
+          const authData = await res.json()
+          if (authData.success && authData.user) {
+            const sName =
+              authData.user.full_name?.trim() ||
+              authData.user.email?.trim() ||
+              authData.user.phone?.trim() ||
+              ''
+            if (sName) {
+              setCurrentUserSupervisor(sName)
+              setFormSupervisor(prev => prev || sName)
+              return
+            }
+          }
+        }
+
+        // 2. Fallback to Supabase Auth
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
           const { data: profile } = await supabase
@@ -140,6 +164,79 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
   const [isCustomFormTask, setIsCustomFormTask] = useState(false)
   const [isCustomBatchTask, setIsCustomBatchTask] = useState(false)
   const [isCustomPurpose, setIsCustomPurpose] = useState(false)
+
+  // ── Dynamic Checklist PPE Items & Settings Modal State ──
+  const [ppeConfigItems, setPpeConfigItems] = useState<ChecklistPpeItem[]>(DEFAULT_CHECKLIST_PPE_ITEMS)
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false)
+  const [formPpeValues, setFormPpeValues] = useState<Record<string, boolean>>({})
+  const [batchPpeValues, setBatchPpeValues] = useState<Record<string, boolean>>({})
+  const [sessionIsAdmin, setSessionIsAdmin] = useState(false)
+
+  // Check admin session
+  useEffect(() => {
+    fetch('/api/auth/me', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(json => {
+        if (json.isAdmin) setSessionIsAdmin(true)
+      })
+      .catch(() => {})
+  }, [])
+
+  const isAdmin = mobileUser?.role === 'admin' || sessionIsAdmin
+
+  // Load PPE settings
+  const loadPpeSettings = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/settings?id=checklist_ppe_items&t=${Date.now()}`, { cache: 'no-store' })
+      const json = await res.json()
+      if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+        setPpeConfigItems(json.data)
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    loadPpeSettings()
+
+    // Auto-reload when window/tab regains focus (e.g. returning from settings)
+    const handleFocus = () => {
+      loadPpeSettings()
+    }
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [loadPpeSettings])
+
+  // Active items (enabled in settings)
+  const activePpeItems = useMemo(() => {
+    const active = ppeConfigItems.filter(i => i.is_active)
+    return active.length > 0 ? active : DEFAULT_CHECKLIST_PPE_ITEMS
+  }, [ppeConfigItems])
+
+  // Helper to check if a checklist entry satisfies all active PPE requirements
+  const checkEntryPpePass = useCallback((entry: ChecklistEntry): boolean => {
+    let details: Record<string, boolean> | null = null
+    try {
+      if (entry.notes) {
+        const parsed = JSON.parse(entry.notes)
+        if (parsed?.ppe_details && typeof parsed.ppe_details === 'object') {
+          details = parsed.ppe_details
+        }
+      }
+    } catch {}
+
+    return activePpeItems.every(item => {
+      if (!item.required) return true
+      if (details && typeof details[item.id] === 'boolean') {
+        return details[item.id]
+      }
+      if (item.id === 'helmet') return !!entry.ppe_helmet
+      if (item.id === 'vest') return !!entry.ppe_vest
+      if (item.id === 'glasses' || item.id === 'shirt') return !!entry.ppe_shirt
+      if (item.id === 'gloves') return !!entry.ppe_gloves
+      if (item.id === 'shoes') return !!entry.ppe_shoes
+      return true
+    })
+  }, [activePpeItems])
 
   // Contractor memory helpers (จำค่า โครงการ/กิจกรรม/สถานที่ ไว้จนกว่าจะเปลี่ยน)
   const getContractorSavedPref = (contractorId: string) => {
@@ -320,7 +417,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
           checkedInTotal++
           if (entry.purpose?.trim()) reqCount++
           const isAlcPass = isAlcoholPassed(entry.alc_result)
-          const isPpePass = entry.ppe_helmet && entry.ppe_vest && entry.ppe_shirt && entry.ppe_gloves && entry.ppe_shoes
+          const isPpePass = checkEntryPpePass(entry)
 
           if (isAlcPass && isPpePass) {
             passed++
@@ -443,6 +540,31 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setIsCustomFormTask(!tasks.includes(taskName) && !!taskName)
       setFormLocation(existingEntry.location || savedPref?.location || compSummary?.location || '')
       setFormAlc(existingEntry.alc_result ? String(existingEntry.alc_result).replace('%', '') : '')
+      
+      // Initialize dynamic PPE items
+      const initialFormPpe: Record<string, boolean> = {}
+      let existingPpeDetails: Record<string, boolean> | null = null
+      try {
+        if (existingEntry.notes) {
+          const parsed = JSON.parse(existingEntry.notes)
+          if (parsed?.ppe_details && typeof parsed.ppe_details === 'object') {
+            existingPpeDetails = parsed.ppe_details
+          }
+        }
+      } catch {}
+
+      activePpeItems.forEach(item => {
+        if (existingPpeDetails && typeof existingPpeDetails[item.id] === 'boolean') {
+          initialFormPpe[item.id] = existingPpeDetails[item.id]
+        } else if (item.id === 'helmet') initialFormPpe[item.id] = existingEntry.ppe_helmet ?? false
+        else if (item.id === 'vest') initialFormPpe[item.id] = existingEntry.ppe_vest ?? false
+        else if (item.id === 'glasses' || item.id === 'shirt') initialFormPpe[item.id] = existingEntry.ppe_shirt ?? false
+        else if (item.id === 'gloves') initialFormPpe[item.id] = existingEntry.ppe_gloves ?? false
+        else if (item.id === 'shoes') initialFormPpe[item.id] = existingEntry.ppe_shoes ?? false
+        else initialFormPpe[item.id] = false
+      })
+      setFormPpeValues(initialFormPpe)
+
       setFormHelmet(existingEntry.ppe_helmet ?? false)
       setFormVest(existingEntry.ppe_vest ?? false)
       setFormShirt(existingEntry.ppe_shirt ?? false)
@@ -450,7 +572,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setFormShoes(existingEntry.ppe_shoes ?? false)
       setFormPurpose(existingEntry.purpose || '')
       setIsCustomPurpose(!PURPOSE_PRESETS.includes(existingEntry.purpose || '') && !!existingEntry.purpose)
-      setFormNotes(existingEntry.notes || '')
+      setFormNotes(extractUserNote(existingEntry.notes))
     } else {
       setFormCheckIn('08:00')
       setFormCheckOut('17:00')
@@ -466,6 +588,12 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setIsCustomFormTask(false)
       setFormLocation(savedPref?.location || compSummary?.location || targetActObj?.location || '')
       setFormAlc('')
+      
+      // Default unchecked for fresh entry
+      const initialFormPpe: Record<string, boolean> = {}
+      activePpeItems.forEach(item => { initialFormPpe[item.id] = false })
+      setFormPpeValues(initialFormPpe)
+
       setFormHelmet(false)
       setFormVest(false)
       setFormShirt(false)
@@ -492,6 +620,9 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
     const targetActObj = activities.find(a => a.id === targetActId) || firstAct
     const defaultTask = targetActObj?.tasks ? targetActObj.tasks.split(/[,;\n]+/)[0]?.trim() : targetActObj?.name || null
 
+    const quickPpeDetails: Record<string, boolean> = {}
+    activePpeItems.forEach(it => { quickPpeDetails[it.id] = true })
+
     const payload = {
       entry_date: date,
       contractor_id: contractor.id || null,
@@ -505,16 +636,19 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       check_in_time: '08:00',
       check_out_time: '17:00',
       alc_result: normalizeAlcForDb('0%') as ALCResult,
-      ppe_helmet: true,
-      ppe_vest: true,
-      ppe_shirt: true,
-      ppe_gloves: true,
-      ppe_shoes: true,
+      ppe_helmet: quickPpeDetails['helmet'] ?? true,
+      ppe_vest: quickPpeDetails['vest'] ?? true,
+      ppe_shirt: quickPpeDetails['glasses'] ?? quickPpeDetails['shirt'] ?? true,
+      ppe_gloves: quickPpeDetails['gloves'] ?? true,
+      ppe_shoes: quickPpeDetails['shoes'] ?? true,
       daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
       status: 'active' as const,
       is_blacklisted: false,
       meal_allowance: false,
-      notes: null,
+      notes: JSON.stringify({
+        ppe_details: quickPpeDetails,
+        ...(extractUserNote(existingEntry?.notes) ? { user_note: extractUserNote(existingEntry?.notes) } : {}),
+      }),
     }
 
     try {
@@ -587,6 +721,12 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
     const memberWage = getContractorDailyWage(selectedContractor)
     const savedPref = selectedContractor.id ? getContractorSavedPref(selectedContractor.id) : null
 
+    const cleanUserNote = extractUserNote(formNotes)
+    const formPpeJson = JSON.stringify({
+      ppe_details: formPpeValues,
+      ...(cleanUserNote ? { user_note: cleanUserNote } : {}),
+    })
+
     const payload = {
       entry_date: date,
       contractor_id: selectedContractor.id || null,
@@ -600,16 +740,16 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       check_in_time: formCheckIn.trim() || null,
       check_out_time: formCheckOut.trim() || null,
       alc_result: normalizeAlcForDb(formAlc) as ALCResult,
-      ppe_helmet: !!formHelmet,
-      ppe_vest: !!formVest,
-      ppe_shirt: !!formShirt,
-      ppe_gloves: !!formGloves,
-      ppe_shoes: !!formShoes,
+      ppe_helmet: formPpeValues['helmet'] ?? !!formHelmet,
+      ppe_vest: formPpeValues['vest'] ?? !!formVest,
+      ppe_shirt: formPpeValues['glasses'] ?? formPpeValues['shirt'] ?? !!formShirt,
+      ppe_gloves: formPpeValues['gloves'] ?? !!formGloves,
+      ppe_shoes: formPpeValues['shoes'] ?? !!formShoes,
       daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
       status: 'active' as const,
       is_blacklisted: false,
       meal_allowance: false,
-      notes: formNotes.trim() || null,
+      notes: formPpeJson,
     }
 
     try {
@@ -693,6 +833,11 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
     setBatchGloves(true)
     setBatchShoes(true)
 
+    // Dynamic PPE for batch pass: default all active items checked
+    const initialBatchPpe: Record<string, boolean> = {}
+    activePpeItems.forEach(it => { initialBatchPpe[it.id] = true })
+    setBatchPpeValues(initialBatchPpe)
+
     setIsBatchModalOpen(true)
   }
 
@@ -715,6 +860,8 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
     }
     setIsSavingBatch(true)
 
+    const batchPpeJson = JSON.stringify({ ppe_details: batchPpeValues })
+
     const selectedContractors = contractors.filter(c => selectedMemberIds.includes(c.id))
     const inserts = selectedContractors.map(c => {
       const memberWage = getContractorDailyWage(c)
@@ -731,16 +878,16 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
         check_in_time: batchCheckIn.trim() || '08:00',
         check_out_time: batchCheckOut.trim() || '17:00',
         alc_result: normalizeAlcForDb('0%') as ALCResult,
-        ppe_helmet: !!batchHelmet,
-        ppe_vest: !!batchVest,
-        ppe_shirt: !!batchShirt,
-        ppe_gloves: !!batchGloves,
-        ppe_shoes: !!batchShoes,
+        ppe_helmet: batchPpeValues['helmet'] ?? !!batchHelmet,
+        ppe_vest: batchPpeValues['vest'] ?? !!batchVest,
+        ppe_shirt: batchPpeValues['glasses'] ?? batchPpeValues['shirt'] ?? !!batchShirt,
+        ppe_gloves: batchPpeValues['gloves'] ?? !!batchGloves,
+        ppe_shoes: batchPpeValues['shoes'] ?? !!batchShoes,
         daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : null,
         status: 'active' as const,
         is_blacklisted: false,
         meal_allowance: false,
-        notes: null,
+        notes: batchPpeJson,
       }
     })
 
@@ -794,8 +941,20 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
               </div>
             </div>
 
-            {/* User Profile / Auth Pill (No Desktop Button) */}
-            <div className="flex items-center gap-2 shrink-0">
+            {/* User Profile / Auth Pill & Settings */}
+            <div className="flex items-center gap-1.5 shrink-0">
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsModalOpen(true)}
+                  className="h-8 px-2.5 rounded-full bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1 border border-white/20 transition-all active:scale-95"
+                  title="ตั้งค่ารายการเช็คลิสต์ PPE"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>ตั้งค่า</span>
+                </button>
+              )}
+
               {onOpenAuth && (
                 <button
                   onClick={onOpenAuth}
@@ -987,14 +1146,26 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
               </p>
             </div>
 
-            <button
-              onClick={() => handleOpenBatchModal()}
-              className="h-8 px-3 rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm border border-emerald-400/30 transition-all active:scale-95"
-              title="ตรวจผ่านแบบกลุ่ม"
-            >
-              <Zap className="w-3.5 h-3.5 fill-white" />
-              <span>{selectedMemberIds.length > 0 ? `ผ่านที่เลือก (${selectedMemberIds.length})` : 'ผ่านทั้งทีม'}</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsModalOpen(true)}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center justify-center border border-white/20 transition-all active:scale-95"
+                  title="ตั้งค่ารายการเช็คลิสต์ PPE"
+                >
+                  <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+                </button>
+              )}
+              <button
+                onClick={() => handleOpenBatchModal()}
+                className="h-8 px-3 rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm border border-emerald-400/30 transition-all active:scale-95"
+                title="ตรวจผ่านแบบกลุ่ม"
+              >
+                <Zap className="w-3.5 h-3.5 fill-white" />
+                <span>{selectedMemberIds.length > 0 ? `ผ่านที่เลือก (${selectedMemberIds.length})` : 'ผ่านทั้งทีม'}</span>
+              </button>
+            </div>
           </div>
 
           {/* Subheader: Status filter tabs & Member search */}
@@ -1142,7 +1313,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                 const entry = getEntryForContractor(member)
                 const isChecked = !!entry
                 const isAlcPass = isChecked ? !isAlcoholFailed(entry.alc_result) : false
-                const isPpePass = isChecked ? (entry.ppe_helmet && entry.ppe_vest && entry.ppe_shirt && entry.ppe_gloves && entry.ppe_shoes) : false
+                const isPpePass = isChecked ? checkEntryPpePass(entry) : false
                 const isSafe = isChecked && isAlcPass && isPpePass
                 const isAlcRisk = getContractorAlcRisk(member)
 
@@ -1298,7 +1469,17 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
               </p>
             </div>
 
-            <div className="w-12" /> {/* Balanced spacer */}
+            {isAdmin && (
+              <button
+                type="button"
+                onClick={() => setIsSettingsModalOpen(true)}
+                className="h-8 px-2.5 rounded-full bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1 border border-white/20 transition-all active:scale-95"
+                title="ตั้งค่ารายการเช็คลิสต์ PPE"
+              >
+                <Sliders className="w-3.5 h-3.5 text-emerald-400" />
+                <span className="hidden sm:inline">ตั้งค่า</span>
+              </button>
+            )}
           </div>
 
           {/* Scrollable Form Area */}
@@ -1565,90 +1746,90 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
               </div>
             </div>
 
-            {/* 4. PPE Checklist (5 Items) */}
+            {/* 4. PPE Checklist (Dynamic Items) */}
             <div className="bg-white p-2.5 rounded-xl border border-slate-300 shadow-2xs space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-900">
                   <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
                   <span>อุปกรณ์ความปลอดภัย (PPE)</span>
+                  <span className="text-[11px] text-slate-500 font-normal">
+                    ({Object.values(formPpeValues).filter(Boolean).length}/{activePpeItems.length})
+                  </span>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const allChecked = formHelmet && formVest && formShirt && formGloves && formShoes
-                    setFormHelmet(!allChecked)
-                    setFormVest(!allChecked)
-                    setFormShirt(!allChecked)
-                    setFormGloves(!allChecked)
-                    setFormShoes(!allChecked)
-                  }}
-                  className="text-xs text-blue-700 hover:underline font-semibold"
-                >
-                  {formHelmet && formVest && formShirt && formGloves && formShoes ? 'ยกเลิกทั้งหมด' : 'เลือกครบ 5 ชิ้น'}
-                </button>
+                <div className="flex items-center gap-2">
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setIsSettingsModalOpen(true)}
+                      className="text-xs text-slate-500 hover:text-emerald-700 font-medium flex items-center gap-0.5"
+                      title="ตั้งค่ารายการ PPE"
+                    >
+                      <Sliders className="w-3 h-3 text-emerald-600" />
+                      <span>จัดการ</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allChecked = activePpeItems.length > 0 && activePpeItems.every(item => !!formPpeValues[item.id])
+                      const nextVal = !allChecked
+                      const updated: Record<string, boolean> = {}
+                      activePpeItems.forEach(item => {
+                        updated[item.id] = nextVal
+                      })
+                      setFormPpeValues(updated)
+                      setFormHelmet(nextVal)
+                      setFormVest(nextVal)
+                      setFormShirt(nextVal)
+                      setFormGloves(nextVal)
+                      setFormShoes(nextVal)
+                    }}
+                    className="text-xs text-blue-700 hover:underline font-semibold"
+                  >
+                    {activePpeItems.length > 0 && activePpeItems.every(item => !!formPpeValues[item.id])
+                      ? 'ยกเลิกทั้งหมด'
+                      : `เลือกครบ ${activePpeItems.length} ชิ้น`}
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2 text-xs font-normal">
-                <label className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
-                  formHelmet ? 'bg-emerald-50 text-emerald-950 border-emerald-400 font-semibold' : 'bg-slate-50 text-slate-700 border-slate-300'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={formHelmet}
-                    onChange={e => setFormHelmet(e.target.checked)}
-                    className="rounded text-emerald-600 focus:ring-0 w-4 h-4"
-                  />
-                  <span>⛑️ หมวกนิรภัย</span>
-                </label>
-
-                <label className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
-                  formVest ? 'bg-emerald-50 text-emerald-950 border-emerald-400 font-semibold' : 'bg-slate-50 text-slate-700 border-slate-300'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={formVest}
-                    onChange={e => setFormVest(e.target.checked)}
-                    className="rounded text-emerald-600 focus:ring-0 w-4 h-4"
-                  />
-                  <span>🦺 เสื้อสะท้อนแสง</span>
-                </label>
-
-                <label className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
-                  formShirt ? 'bg-emerald-50 text-emerald-950 border-emerald-400 font-semibold' : 'bg-slate-50 text-slate-700 border-slate-300'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={formShirt}
-                    onChange={e => setFormShirt(e.target.checked)}
-                    className="rounded text-emerald-600 focus:ring-0 w-4 h-4"
-                  />
-                  <span>🥽 แว่นตา</span>
-                </label>
-
-                <label className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
-                  formGloves ? 'bg-emerald-50 text-emerald-950 border-emerald-400 font-semibold' : 'bg-slate-50 text-slate-700 border-slate-300'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={formGloves}
-                    onChange={e => setFormGloves(e.target.checked)}
-                    className="rounded text-emerald-600 focus:ring-0 w-4 h-4"
-                  />
-                  <span>🧤 ถุงมือ</span>
-                </label>
-
-                <label className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all col-span-2 ${
-                  formShoes ? 'bg-emerald-50 text-emerald-950 border-emerald-400 font-semibold' : 'bg-slate-50 text-slate-700 border-slate-300'
-                }`}>
-                  <input
-                    type="checkbox"
-                    checked={formShoes}
-                    onChange={e => setFormShoes(e.target.checked)}
-                    className="rounded text-emerald-600 focus:ring-0 w-4 h-4"
-                  />
-                  <span>🥾 รองเท้านิรภัย (หัวเหล็ก)</span>
-                </label>
+                {activePpeItems.map((item, idx) => {
+                  const isChecked = !!formPpeValues[item.id]
+                  const isLastOdd = activePpeItems.length % 2 !== 0 && idx === activePpeItems.length - 1
+                  return (
+                    <label
+                      key={item.id}
+                      className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
+                        isLastOdd ? 'col-span-2' : ''
+                      } ${
+                        isChecked
+                          ? 'bg-emerald-50 text-emerald-950 border-emerald-400 font-semibold shadow-2xs'
+                          : 'bg-slate-50 text-slate-700 border-slate-300'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        onChange={e => {
+                          const checked = e.target.checked
+                          setFormPpeValues(prev => ({ ...prev, [item.id]: checked }))
+                          if (item.id === 'helmet') setFormHelmet(checked)
+                          if (item.id === 'vest') setFormVest(checked)
+                          if (item.id === 'glasses' || item.id === 'shirt') setFormShirt(checked)
+                          if (item.id === 'gloves') setFormGloves(checked)
+                          if (item.id === 'shoes') setFormShoes(checked)
+                        }}
+                        className="rounded text-emerald-600 focus:ring-0 w-4 h-4 shrink-0"
+                      />
+                      <span className="truncate">{item.icon} {item.label}</span>
+                      {item.required && !isChecked && (
+                        <span className="text-[10px] text-amber-600 ml-auto shrink-0 font-medium">*</span>
+                      )}
+                    </label>
+                  )
+                })}
               </div>
             </div>
 
@@ -1963,57 +2144,31 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                   </label>
                   <span className="text-[11px] text-emerald-700 font-semibold">แอลกอฮอล์: 0% ผ่าน</span>
                 </div>
-                <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setBatchHelmet(!batchHelmet)}
-                    className={`h-8 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all ${
-                      batchHelmet ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'
-                    }`}
-                  >
-                    {batchHelmet && <Check className="w-3 h-3 stroke-[3]" />}
-                    <span>หมวก</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBatchVest(!batchVest)}
-                    className={`h-8 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all ${
-                      batchVest ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'
-                    }`}
-                  >
-                    {batchVest && <Check className="w-3 h-3 stroke-[3]" />}
-                    <span>เสื้อกั๊ก</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBatchShirt(!batchShirt)}
-                    className={`h-8 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all ${
-                      batchShirt ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'
-                    }`}
-                  >
-                    {batchShirt && <Check className="w-3 h-3 stroke-[3]" />}
-                    <span>แว่นตา</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBatchGloves(!batchGloves)}
-                    className={`h-8 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all ${
-                      batchGloves ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'
-                    }`}
-                  >
-                    {batchGloves && <Check className="w-3 h-3 stroke-[3]" />}
-                    <span>ถุงมือ</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBatchShoes(!batchShoes)}
-                    className={`h-8 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all ${
-                      batchShoes ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'
-                    }`}
-                  >
-                    {batchShoes && <Check className="w-3 h-3 stroke-[3]" />}
-                    <span>รองเท้า</span>
-                  </button>
+                <div className="flex flex-wrap gap-1.5">
+                  {activePpeItems.map(item => {
+                    const isChecked = !!batchPpeValues[item.id]
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => {
+                          const next = !isChecked
+                          setBatchPpeValues(prev => ({ ...prev, [item.id]: next }))
+                          if (item.id === 'helmet') setBatchHelmet(next)
+                          if (item.id === 'vest') setBatchVest(next)
+                          if (item.id === 'glasses' || item.id === 'shirt') setBatchShirt(next)
+                          if (item.id === 'gloves') setBatchGloves(next)
+                          if (item.id === 'shoes') setBatchShoes(next)
+                        }}
+                        className={`h-8 px-2.5 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all active:scale-95 ${
+                          isChecked ? 'bg-emerald-600 text-white border-emerald-600 shadow-2xs' : 'bg-white text-slate-600 border-slate-300'
+                        }`}
+                      >
+                        {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
+                        <span>{item.icon} {item.label}</span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             </div>
@@ -2049,6 +2204,18 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
           </div>
         </div>
       )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          PPE SETTINGS MODAL (ตั้งค่ารายการเช็คลิสต์ เพิ่ม/ลด/แก้ไข/จัดลำดับ)
+      ────────────────────────────────────────────────────────────────────────── */}
+      <PpeSettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
+        onSaved={items => {
+          setPpeConfigItems(items)
+          toast.success('อัปเดตรายการเช็คลิสต์เรียบร้อย')
+        }}
+      />
 
     </div>
   )

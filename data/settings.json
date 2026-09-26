@@ -1,0 +1,59 @@
+{
+  "checklist_ppe_items": [
+    {
+      "id": "helmet",
+      "label": "หมวก",
+      "icon": "⛑️",
+      "required": true,
+      "is_active": true,
+      "sort_order": 1
+    },
+    {
+      "id": "vest",
+      "label": "กั๊ก",
+      "icon": "🦺",
+      "required": true,
+      "is_active": true,
+      "sort_order": 2
+    },
+    {
+      "id": "glasses",
+      "label": "แว่นตา",
+      "icon": "🥽",
+      "required": true,
+      "is_active": true,
+      "sort_order": 3
+    },
+    {
+      "id": "gloves",
+      "label": "ถุงมือ",
+      "icon": "🧤",
+      "required": true,
+      "is_active": true,
+      "sort_order": 4
+    },
+    {
+      "id": "shoes",
+      "label": "รองเท้า",
+      "icon": "👢",
+      "required": true,
+      "is_active": true,
+      "sort_order": 5
+    }
+  ],
+  "notification_config": {
+    "line_enabled": true,
+    "line_channel_access_token": "",
+    "line_target_id": "",
+    "line_broadcast": false,
+    "telegram_enabled": false,
+    "telegram_bot_token": "",
+    "telegram_chat_id": "",
+    "schedule_enabled": true,
+    "schedule_times": [
+      "09:00"
+    ],
+    "schedule_mode": "flex",
+    "cron_secret": "sitecheck-cron-secret"
+  }
+}

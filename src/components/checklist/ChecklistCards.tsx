@@ -1,6 +1,7 @@
 'use client'
 
-import type { ChecklistEntry } from '@/lib/types'
+import { useState, useEffect } from 'react'
+import type { ChecklistEntry, ChecklistPpeItem } from '@/lib/types'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import {
@@ -8,23 +9,41 @@ import {
   HardHat, CheckCircle2, XCircle, AlertTriangle, Shield,
 } from 'lucide-react'
 import Link from 'next/link'
-import { getContractorAlcRisk, isAlcoholFailed, isAlcoholUnchecked } from '@/lib/types'
+import { getContractorAlcRisk, isAlcoholFailed, isAlcoholUnchecked, DEFAULT_CHECKLIST_PPE_ITEMS } from '@/lib/types'
 
-/* ── PPE compact ── */
-const PPEStrip = ({ entry }: { entry: ChecklistEntry }) => {
-  const items = [
-    { label: 'หมวก',    v: entry.ppe_helmet },
-    { label: 'กั๊ก',    v: entry.ppe_vest   },
-    { label: 'แว่นตา',  v: entry.ppe_shirt  },
-    { label: 'ถุงมือ',  v: entry.ppe_gloves },
-    { label: 'รองเท้า', v: entry.ppe_shoes  },
-  ]
+/* ── Dynamic PPE compact ── */
+const PPEStrip = ({ entry, ppeConfig }: { entry: ChecklistEntry; ppeConfig: ChecklistPpeItem[] }) => {
+  let details: Record<string, boolean> | null = null
+  try {
+    if (entry.notes) {
+      const parsed = JSON.parse(entry.notes)
+      if (parsed?.ppe_details && typeof parsed.ppe_details === 'object') {
+        details = parsed.ppe_details
+      }
+    }
+  } catch {}
+
+  const activeItems = ppeConfig.filter(i => i.is_active)
+  const items = (activeItems.length > 0 ? activeItems : DEFAULT_CHECKLIST_PPE_ITEMS).map(it => {
+    let passed = false
+    if (details && typeof details[it.id] === 'boolean') {
+      passed = details[it.id]
+    } else if (it.id === 'helmet') passed = !!entry.ppe_helmet
+    else if (it.id === 'vest') passed = !!entry.ppe_vest
+    else if (it.id === 'glasses' || it.id === 'shirt') passed = !!entry.ppe_shirt
+    else if (it.id === 'gloves') passed = !!entry.ppe_gloves
+    else if (it.id === 'shoes') passed = !!entry.ppe_shoes
+    return { ...it, v: passed }
+  })
+
   const pass = items.filter(i => i.v).length
+  const total = items.length
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
       <div style={{ display: 'flex', gap: 3 }}>
         {items.map(i => (
-          <span key={i.label} title={i.label} style={{
+          <span key={i.id} title={`${i.label}: ${i.v ? 'ผ่าน' : 'ไม่ผ่าน'}`} style={{
             width: 10, height: 10, borderRadius: '50%',
             background: i.v ? 'hsl(142 72% 29%)' : 'hsl(var(--c-border-2))',
           }} />
@@ -32,9 +51,9 @@ const PPEStrip = ({ entry }: { entry: ChecklistEntry }) => {
       </div>
       <span style={{
         fontSize: 12, fontWeight: 400, lineHeight: 1,
-        color: pass === 5 ? 'hsl(142 72% 29%)' : pass >= 3 ? 'hsl(34 90% 38%)' : 'hsl(0 72% 50%)',
+        color: pass === total ? 'hsl(142 72% 29%)' : pass >= Math.ceil(total / 2) ? 'hsl(34 90% 38%)' : 'hsl(0 72% 50%)',
       }}>
-        {pass}/5
+        {pass}/{total}
       </span>
     </div>
   )
@@ -47,6 +66,18 @@ interface ChecklistCardsProps {
 }
 
 export function ChecklistCards({ entries, loading, onDelete }: ChecklistCardsProps) {
+  const [ppeConfig, setPpeConfig] = useState<ChecklistPpeItem[]>(DEFAULT_CHECKLIST_PPE_ITEMS)
+
+  useEffect(() => {
+    fetch(`/api/settings?id=checklist_ppe_items&t=${Date.now()}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(json => {
+        if (json.success && Array.isArray(json.data) && json.data.length > 0) {
+          setPpeConfig(json.data)
+        }
+      })
+      .catch(() => {})
+  }, [])
 
   if (loading) {
     return (
@@ -200,7 +231,7 @@ export function ChecklistCards({ entries, loading, onDelete }: ChecklistCardsPro
                     </>
                   )}
                 </span>
-                <PPEStrip entry={e} />
+                <PPEStrip entry={e} ppeConfig={ppeConfig} />
                 {e.noise_area && (
                   <span className="badge badge-warn" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 400 }}>
                     <Zap className="w-3.5 h-3.5" />พื้นที่เสียงดัง

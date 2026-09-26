@@ -13,7 +13,7 @@ import { QuickTeamChecklist } from '@/components/checklist/QuickTeamChecklist'
 import {
   Plus, Search, RefreshCw, LayoutGrid, TableProperties,
   ChevronLeft, ChevronRight, CalendarDays, AlertTriangle,
-  Zap, FileText, MessageSquare, Smartphone
+  Zap, FileText, MessageSquare, Smartphone, Sliders
 } from 'lucide-react'
 import Link from 'next/link'
 
@@ -28,15 +28,18 @@ export default function ChecklistPage() {
 
   const fetchEntries = useCallback(async () => {
     setLoading(true)
-    let q = supabase.from('checklist_entries').select('*')
-      .eq('entry_date', date).order('created_at', { ascending: true })
-    if (search) q = q.or(
-      `contractor_name.ilike.%${search}%,company_name.ilike.%${search}%,supervisor.ilike.%${search}%,activity_name.ilike.%${search}%`
-    )
-    const { data, error } = await q
-    if (error) toast.error('โหลดข้อมูลไม่สำเร็จ')
-    else setEntries(data ?? [])
-    setLoading(false)
+    try {
+      const params = new URLSearchParams({ date })
+      if (search.trim()) params.set('search', search.trim())
+      const res = await fetch(`/api/checklist?${params.toString()}`)
+      const json = await res.json()
+      if (json.error) throw new Error(json.error)
+      setEntries(json.data ?? [])
+    } catch {
+      toast.error('โหลดข้อมูลไม่สำเร็จ')
+    } finally {
+      setLoading(false)
+    }
   }, [date, search])
 
   useEffect(() => { fetchEntries() }, [fetchEntries])
@@ -44,9 +47,24 @@ export default function ChecklistPage() {
   useEffect(() => {
     const ch = supabase.channel('cl_rt')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'checklist_entries' }, fetchEntries)
+      .on('broadcast', { event: 'checklist_updated' }, fetchEntries)
       .subscribe()
-    return () => { supabase.removeChannel(ch) }
-  }, [fetchEntries])
+
+    const handleFocus = () => {
+      fetchEntries()
+    }
+    window.addEventListener('focus', handleFocus)
+
+    const interval = setInterval(() => {
+      fetchEntries()
+    }, 10000)
+
+    return () => {
+      supabase.removeChannel(ch)
+      window.removeEventListener('focus', handleFocus)
+      clearInterval(interval)
+    }
+  }, [fetchEntries, supabase])
 
   const handleDelete = async (id: string) => {
     try {
@@ -166,6 +184,15 @@ export default function ChecklistPage() {
           >
             <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
           </button>
+
+          <Link
+            href="/settings"
+            className="h-8 px-2.5 rounded-md bg-slate-100 hover:bg-slate-200 border border-slate-300 text-slate-700 hover:text-slate-900 text-[11px] font-bold flex items-center gap-1.5 shadow-2xs transition-colors"
+            title="ไปหน้าตั้งค่าระบบและรายการเช็คลิสต์ PPE"
+          >
+            <Sliders className="w-3.5 h-3.5 text-slate-600" />
+            <span className="hidden sm:inline">ตั้งค่า</span>
+          </Link>
 
           <Link
             href="/line-oa"
