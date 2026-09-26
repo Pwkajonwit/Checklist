@@ -201,8 +201,8 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
 
   const ppeFields = [
     { key: 'ppe_helmet' as const, label: '⛑ หมวก' },
-    { key: 'ppe_vest' as const, label: '🦺 เวนดิ' },
-    { key: 'ppe_shirt' as const, label: '👕 เสื้อ' },
+    { key: 'ppe_vest' as const, label: '🦺 เสื้อกั๊ก' },
+    { key: 'ppe_shirt' as const, label: '🥽 แว่นตา' },
     { key: 'ppe_gloves' as const, label: '🧤 ถุงมือ' },
     { key: 'ppe_shoes' as const, label: '👢 รองเท้า' },
   ]

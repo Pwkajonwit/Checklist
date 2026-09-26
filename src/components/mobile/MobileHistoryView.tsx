@@ -34,22 +34,14 @@ export function MobileHistoryView({ onOpenAuth, mobileUser }: MobileHistoryViewP
     else setRefreshing(true)
 
     try {
-      let query = supabase
-        .from('checklist_entries')
-        .select('*')
-        .gte('entry_date', dateFrom)
-        .lte('entry_date', dateTo)
-        .order('entry_date', { ascending: false })
-        .order('created_at', { ascending: false })
+      const params = new URLSearchParams()
+      if (dateFrom) params.set('from', dateFrom)
+      if (dateTo) params.set('to', dateTo)
+      if (search.trim()) params.set('search', search.trim())
 
-      if (search.trim()) {
-        query = query.or(
-          `contractor_name.ilike.%${search.trim()}%,company_name.ilike.%${search.trim()}%,activity_name.ilike.%${search.trim()}%`
-        )
-      }
-
-      const { data, error } = await query
-      if (error) throw error
+      const res = await fetch(`/api/checklist?${params.toString()}`)
+      const { data, error } = await res.json()
+      if (error) throw new Error(error)
       setEntries(data ?? [])
     } catch (err: unknown) {
       console.error('Fetch history error:', err)
@@ -58,7 +50,7 @@ export function MobileHistoryView({ onOpenAuth, mobileUser }: MobileHistoryViewP
       setLoading(false)
       setRefreshing(false)
     }
-  }, [supabase, dateFrom, dateTo, search])
+  }, [dateFrom, dateTo, search])
 
   useEffect(() => {
     fetchEntries()

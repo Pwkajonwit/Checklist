@@ -33,7 +33,7 @@ async function getDashboardData(today: string) {
 const ppeFields = [
   { key: 'ppe_helmet' as const, label: 'หมวกนิรภัย', icon: '⛑' },
   { key: 'ppe_vest' as const,   label: 'เสื้อกั๊กสะท้อนแสง', icon: '🦺' },
-  { key: 'ppe_shirt' as const,  label: 'เสื้อแขนยาว', icon: '👕' },
+  { key: 'ppe_shirt' as const,  label: 'แว่นตา', icon: '🥽' },
   { key: 'ppe_gloves' as const, label: 'ถุงมือเซฟตี้', icon: '🧤' },
   { key: 'ppe_shoes' as const,  label: 'รองเท้าเซฟตี้', icon: '👢' },
 ]

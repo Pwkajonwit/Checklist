@@ -1253,7 +1253,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                             {[
                               { key: 'ppe_helmet' as const, label: 'หมวก', icon: '⛑️' },
                               { key: 'ppe_vest' as const, label: 'กั๊ก', icon: '🦺' },
-                              { key: 'ppe_shirt' as const, label: 'เสื้อ', icon: '👕' },
+                              { key: 'ppe_shirt' as const, label: 'แว่นตา', icon: '🥽' },
                               { key: 'ppe_gloves' as const, label: 'ถุงมือ', icon: '🧤' },
                               { key: 'ppe_shoes' as const, label: 'รองเท้า', icon: '👢' },
                             ].map(item => {
@@ -1713,10 +1713,10 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                       </div>
                     </th>
 
-                    {/* PPE 3: เสื้อ */}
+                    {/* PPE 3: แว่นตา */}
                     <th className="py-1.5 px-1.5 text-center min-w-[52px] font-semibold border-r border-slate-300">
                       <div className="flex flex-col items-center">
-                        <span>เสื้อ</span>
+                        <span>แว่นตา</span>
                         <button
                           onClick={() => bulkToggleColumn('ppe_shirt')}
                           className="text-xs font-normal text-blue-700 hover:text-blue-900 leading-none mt-0.5"
@@ -2004,7 +2004,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                             </button>
                           </td>
 
-                          {/* PPE 3: เสื้อ */}
+                          {/* PPE 3: แว่นตา */}
                           <td className="py-1.5 px-1 text-center border-r border-slate-200">
                             <button
                               type="button"

@@ -87,15 +87,12 @@ export const COMMON_TASK_PRESETS = [
 ]
 
 export const PURPOSE_PRESETS = [
+  'เข้าปฏิบัติงานตามปกติ',
   'ไม่มา',
   'ขอเข้า 08:30',
   'ขอเข้า 09:00',
   'ขอเข้า 09:30',
   'ขอเข้า 10:00',
-  'ขอออกก่อนเวลา (16:00)',
-  'ขอทำงานล่วงเวลา (OT ถึง 20:00)',
-  'ขอทำงานกะดึก',
-  'เข้าปฏิบัติงานตามปกติ',
 ]
 
 export type ALCResult = string | null // ค่าตัวเลขปกติ เช่น '0', '25', หรือค่าว่าง null/'' เมื่อยังไม่ได้ตรวจ
@@ -123,8 +120,16 @@ export const isAlcoholFailed = (val?: string | null): boolean => {
 }
 
 export const normalizeAlcForDb = (val?: string | null): string | null => {
-  if (isAlcoholUnchecked(val)) return null
-  return String(val).trim()
+  if (isAlcoholUnchecked(val)) return 'ไม่ได้ตรวจ'
+  const trimmed = String(val).trim()
+  if (!trimmed || trimmed === 'ไม่ได้ตรวจ') return 'ไม่ได้ตรวจ'
+  if (trimmed === '0%' || trimmed === '0' || trimmed === '0.0' || trimmed === '0.00') return '0%'
+  if (trimmed === '>0%' || trimmed.startsWith('>') || trimmed.includes('เกิน')) return '>0%'
+  const num = parseFloat(trimmed.replace(/[%mg]/gi, '').trim())
+  if (!isNaN(num)) {
+    return num > 0 ? '>0%' : '0%'
+  }
+  return '0%'
 }
 
 export type EntryStatus = 'active' | 'checked_out' | 'cancelled'

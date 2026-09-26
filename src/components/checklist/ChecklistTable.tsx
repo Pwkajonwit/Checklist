@@ -17,7 +17,7 @@ const PPECompact = ({ entry }: { entry: ChecklistEntry }) => {
   const items = [
     { label: 'หมวก', v: entry.ppe_helmet, icon: '⛑' },
     { label: 'กั๊ก', v: entry.ppe_vest, icon: '🦺' },
-    { label: 'เสื้อ', v: entry.ppe_shirt, icon: '👕' },
+    { label: 'แว่นตา', v: entry.ppe_shirt, icon: '🥽' },
     { label: 'ถุงมือ', v: entry.ppe_gloves, icon: '🧤' },
     { label: 'รองเท้า', v: entry.ppe_shoes, icon: '👢' },
   ]

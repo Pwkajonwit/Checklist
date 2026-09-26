@@ -23,7 +23,7 @@ import {
   XCircle, AlertTriangle, ShieldCheck, ShieldAlert, Clock,
   MapPin, Briefcase, User, Save, RefreshCw, Zap, ArrowLeft,
   Check, X, FileText, ChevronDown, Plus, Sparkles, Building2,
-  Users, CheckCircle, MessageSquare, Phone, Monitor
+  Users, CheckCircle, MessageSquare, Phone, Monitor, RotateCcw
 } from 'lucide-react'
 
 interface MobileChecklistMProps {
@@ -52,6 +52,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setCurrentStep(1)
       setSelectedCompany(null)
       setSelectedContractor(null)
+      setSelectedMemberIds([])
       setCompanySearch('')
       setMemberSearch('')
     }
@@ -119,6 +120,26 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
   const [formNotes, setFormNotes] = useState('')
   const [savingForm, setSavingForm] = useState(false)
   const [savingQuickId, setSavingQuickId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
+  // ── Multi-select & Batch Pass Modal State ──
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([])
+  const [isBatchModalOpen, setIsBatchModalOpen] = useState(false)
+  const [isSavingBatch, setIsSavingBatch] = useState(false)
+  const [batchActivityId, setBatchActivityId] = useState('')
+  const [batchActivityName, setBatchActivityName] = useState('')
+  const [batchLocation, setBatchLocation] = useState('')
+  const [batchSupervisor, setBatchSupervisor] = useState('')
+  const [batchCheckIn, setBatchCheckIn] = useState('08:00')
+  const [batchCheckOut, setBatchCheckOut] = useState('17:00')
+  const [batchHelmet, setBatchHelmet] = useState(true)
+  const [batchVest, setBatchVest] = useState(true)
+  const [batchShirt, setBatchShirt] = useState(true)
+  const [batchGloves, setBatchGloves] = useState(true)
+  const [batchShoes, setBatchShoes] = useState(true)
+  const [isCustomFormTask, setIsCustomFormTask] = useState(false)
+  const [isCustomBatchTask, setIsCustomBatchTask] = useState(false)
+  const [isCustomPurpose, setIsCustomPurpose] = useState(false)
 
   // Contractor memory helpers (จำค่า โครงการ/กิจกรรม/สถานที่ ไว้จนกว่าจะเปลี่ยน)
   const getContractorSavedPref = (contractorId: string) => {
@@ -170,6 +191,10 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
     return getTasksForActivity(formActivityId)
   }, [getTasksForActivity, formActivityId])
 
+  const tasksForBatchActivity = useMemo(() => {
+    return getTasksForActivity(batchActivityId)
+  }, [getTasksForActivity, batchActivityId])
+
   // Load Data
   const loadData = useCallback(async (isSilent = false) => {
     if (!isSilent) setLoading(true)
@@ -177,23 +202,23 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
 
     try {
       const [
-        { data: eData, error: eErr },
+        entriesRes,
         { data: cData, error: cErr },
         { data: coData, error: coErr },
         { data: aData, error: aErr }
       ] = await Promise.all([
-        supabase.from('checklist_entries').select('*').eq('entry_date', date),
+        fetch(`/api/checklist?date=${date}`).then(r => r.json()),
         supabase.from('contractors').select('*').eq('is_active', true).order('name'),
         supabase.from('companies').select('*').order('name'),
         supabase.from('activities').select('*').eq('is_active', true).order('name'),
       ])
 
-      if (eErr) throw eErr
+      if (entriesRes.error) throw new Error(entriesRes.error)
       if (cErr) throw cErr
       if (coErr) throw coErr
       if (aErr) throw aErr
 
-      setEntries(eData ?? [])
+      setEntries(entriesRes.data ?? [])
       setContractors(cData ?? [])
       setCompanies(coData ?? [])
       setActivities(aData ?? [])
@@ -364,11 +389,37 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
   // 3. STEP NAVIGATION HANDLERS
   // ══════════════════════════════════════════════════════════════════════════
 
+  // Pending members in the current company
+  const pendingMembersInTeam = useMemo(() => {
+    if (!selectedCompany) return []
+    return contractors.filter(c =>
+      (c.company_name || 'รับจ้างอิสระ').trim() === selectedCompany &&
+      !getEntryForContractor(c)
+    )
+  }, [contractors, selectedCompany, getEntryForContractor])
+
+  const handleToggleSelectMember = (id: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    setSelectedMemberIds(prev =>
+      prev.includes(id) ? prev.filter(mId => mId !== id) : [...prev, id]
+    )
+  }
+
+  const handleToggleSelectAll = () => {
+    const pendingIds = pendingMembersInTeam.map(c => c.id)
+    if (selectedMemberIds.length === pendingIds.length && pendingIds.length > 0) {
+      setSelectedMemberIds([])
+    } else {
+      setSelectedMemberIds(pendingIds)
+    }
+  }
+
   // Navigate to Step 2 (Frame 5)
   const handleSelectCompany = (compName: string) => {
     setSelectedCompany(compName)
     setMemberSearch('')
     setMemberStatusFilter('pending')
+    setSelectedMemberIds([])
     setCurrentStep(2)
   }
 
@@ -389,6 +440,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setFormSupervisor(existingEntry.supervisor || savedPref?.supervisor || mobileUser?.name || currentUserSupervisor || '')
       setFormActivityId(actId)
       setFormActivityName(taskName)
+      setIsCustomFormTask(!tasks.includes(taskName) && !!taskName)
       setFormLocation(existingEntry.location || savedPref?.location || compSummary?.location || '')
       setFormAlc(existingEntry.alc_result ? String(existingEntry.alc_result).replace('%', '') : '')
       setFormHelmet(existingEntry.ppe_helmet ?? false)
@@ -397,6 +449,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setFormGloves(existingEntry.ppe_gloves ?? false)
       setFormShoes(existingEntry.ppe_shoes ?? false)
       setFormPurpose(existingEntry.purpose || '')
+      setIsCustomPurpose(!PURPOSE_PRESETS.includes(existingEntry.purpose || '') && !!existingEntry.purpose)
       setFormNotes(existingEntry.notes || '')
     } else {
       setFormCheckIn('08:00')
@@ -410,6 +463,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
 
       setFormActivityId(targetActId)
       setFormActivityName(taskName)
+      setIsCustomFormTask(false)
       setFormLocation(savedPref?.location || compSummary?.location || targetActObj?.location || '')
       setFormAlc('')
       setFormHelmet(false)
@@ -418,6 +472,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setFormGloves(false)
       setFormShoes(false)
       setFormPurpose('')
+      setIsCustomPurpose(false)
       setFormNotes('')
     }
 
@@ -487,11 +542,39 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       toast.success(`⚡ ตรวจผ่าน: ${contractor.name}`)
       await loadData(true)
     } catch (err: any) {
-      console.warn('Quick pass sync note:', err)
-      toast.success(`บันทึกเข้าระบบแล้ว: ${contractor.name}`)
-      await loadData(true)
+      console.error('Quick pass error:', err)
+      toast.error(`บันทึกไม่สำเร็จ: ${err?.message || 'เกิดข้อผิดพลาด'}`)
     } finally {
       setSavingQuickId(null)
+    }
+  }
+
+  // Cancel / Revoke Checklist Entry (กรณีกดผิด / ต้องการยกเลิกการตรวจ)
+  const handleCancelEntry = async (contractor: Contractor, entry: ChecklistEntry, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    const isConfirmed = window.confirm(`ต้องการยกเลิกการตรวจของ "${contractor.name}" ใช่หรือไม่?\n(สถานะจะกลับเป็นยังไม่ตรวจ)`)
+    if (!isConfirmed) return
+
+    setDeletingId(entry.id)
+    try {
+      const res = await fetch(`/api/checklist/${entry.id}`, {
+        method: 'DELETE',
+      })
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.error || 'ยกเลิกไม่สำเร็จ')
+      }
+      toast.success(`ยกเลิกการตรวจของ ${contractor.name} เรียบร้อย`)
+      await loadData(true)
+      if (currentStep === 3) {
+        setCurrentStep(2)
+        setSelectedContractor(null)
+      }
+    } catch (err: any) {
+      console.error('Cancel entry error:', err)
+      toast.error(`ยกเลิกไม่สำเร็จ: ${err?.message || 'เกิดข้อผิดพลาด'}`)
+    } finally {
+      setDeletingId(null)
     }
   }
 
@@ -570,49 +653,89 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setCurrentStep(2)
       setSelectedContractor(null)
     } catch (err: any) {
-      console.warn('Save form sync note:', err)
-      toast.success(`บันทึก ${selectedContractor.name} เข้าระบบเรียบร้อย`)
-      await loadData(true)
-      setCurrentStep(2)
-      setSelectedContractor(null)
+      console.error('Save form error:', err)
+      toast.error(`บันทึกไม่สำเร็จ: ${err?.message || 'เกิดข้อผิดพลาด'}`)
     } finally {
       setSavingForm(false)
     }
   }
 
-  // Quick Pass All Remaining in Step 2
-  const handleQuickPassAllInTeam = async () => {
-    if (!selectedCompany) return
-    const pending = currentTeamMembers.filter(c => !getEntryForContractor(c))
-    if (pending.length === 0) {
-      toast.info('ทุกคนในสังกัดนี้ตรวจบันทึกครบแล้ว')
+  // Open Batch Checklist Modal (เลือกโครงการ, งาน, สถานที่, หัวหน้างาน, PPE ก่อนกดยืนยันผ่าน)
+  const handleOpenBatchModal = (idsToUse?: string[]) => {
+    let ids = idsToUse && idsToUse.length > 0 ? idsToUse : selectedMemberIds
+    if (!ids || ids.length === 0) {
+      ids = pendingMembersInTeam.map(c => c.id)
+    }
+
+    if (ids.length === 0) {
+      toast.info('ไม่มีรายชื่อช่างที่ยังไม่ได้ตรวจในสังกัดนี้')
       return
     }
 
-    setSavingForm(true)
+    setSelectedMemberIds(ids)
+
+    // Prefill Project & Task from company summary or first activity
     const compSummary = companySummaries.find(c => c.name === selectedCompany)
     const firstAct = activities[0]
+    const actId = firstAct?.id || ''
+    const tasks = getTasksForActivity(actId)
 
-    const inserts = pending.map(c => {
+    setBatchActivityId(actId)
+    setBatchActivityName(tasks[0] || firstAct?.name || compSummary?.activityName || '')
+    setIsCustomBatchTask(false)
+    setBatchLocation(compSummary?.location || firstAct?.location || '')
+    setBatchSupervisor(formSupervisor.trim() || mobileUser?.name || currentUserSupervisor || '')
+    setBatchCheckIn('08:00')
+    setBatchCheckOut('17:00')
+    setBatchHelmet(true)
+    setBatchVest(true)
+    setBatchShirt(true)
+    setBatchGloves(true)
+    setBatchShoes(true)
+
+    setIsBatchModalOpen(true)
+  }
+
+  const handleBatchActivityChange = (actId: string) => {
+    setBatchActivityId(actId)
+    const act = activities.find(a => a.id === actId)
+    const tasks = getTasksForActivity(actId)
+    setBatchActivityName(tasks[0] || act?.name || '')
+    setIsCustomBatchTask(false)
+    if (act?.location) {
+      setBatchLocation(act.location)
+    }
+  }
+
+  // Confirm Batch Pass
+  const handleConfirmBatchPass = async () => {
+    if (selectedMemberIds.length === 0) {
+      toast.warning('กรุณาเลือกช่างอย่างน้อย 1 คน')
+      return
+    }
+    setIsSavingBatch(true)
+
+    const selectedContractors = contractors.filter(c => selectedMemberIds.includes(c.id))
+    const inserts = selectedContractors.map(c => {
       const memberWage = getContractorDailyWage(c)
       return {
         entry_date: date,
         contractor_id: c.id || null,
         contractor_name: c.name,
         company_name: c.company_name || selectedCompany,
-        supervisor: formSupervisor.trim() || mobileUser?.name || currentUserSupervisor || null,
+        supervisor: batchSupervisor.trim() || null,
         purpose: null,
-        activity_id: firstAct?.id || null,
-        activity_name: compSummary?.activityName || firstAct?.name || null,
-        location: compSummary?.location || firstAct?.location || null,
-        check_in_time: '08:00',
-        check_out_time: '17:00',
+        activity_id: batchActivityId || null,
+        activity_name: batchActivityName.trim() || null,
+        location: batchLocation.trim() || null,
+        check_in_time: batchCheckIn.trim() || '08:00',
+        check_out_time: batchCheckOut.trim() || '17:00',
         alc_result: normalizeAlcForDb('0%') as ALCResult,
-        ppe_helmet: true,
-        ppe_vest: true,
-        ppe_shirt: true,
-        ppe_gloves: true,
-        ppe_shoes: true,
+        ppe_helmet: !!batchHelmet,
+        ppe_vest: !!batchVest,
+        ppe_shirt: !!batchShirt,
+        ppe_gloves: !!batchGloves,
+        ppe_shoes: !!batchShoes,
         daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : null,
         status: 'active' as const,
         is_blacklisted: false,
@@ -629,16 +752,17 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       })
       if (!res.ok) {
         const errData = await res.json()
-        throw new Error(errData.error)
+        throw new Error(errData.error || 'บันทึกไม่สำเร็จ')
       }
-      toast.success(`⚡ ตรวจผ่านด่วนทั้งทีม ${inserts.length} คน เรียบร้อย!`)
+      toast.success(`⚡ ตรวจผ่านกลุ่ม ${inserts.length} คน เรียบร้อย!`)
+      setIsBatchModalOpen(false)
+      setSelectedMemberIds([])
       await loadData(true)
     } catch (err: any) {
-      console.warn('Quick pass all team sync note:', err)
-      toast.success(`บันทึกทั้งทีม ${inserts.length} คน เข้าระบบเรียบร้อย!`)
-      await loadData(true)
+      console.error('Batch pass error:', err)
+      toast.error(`บันทึกไม่สำเร็จ: ${err?.message || 'เกิดข้อผิดพลาด'}`)
     } finally {
-      setSavingForm(false)
+      setIsSavingBatch(false)
     }
   }
 
@@ -844,7 +968,10 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
           {/* Top Bar (Premium Dark Gradient Header with Back Button) */}
           <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 text-white px-3.5 py-2.5 shrink-0 flex items-center justify-between border-b border-slate-800 shadow-md">
             <button
-              onClick={() => setCurrentStep(1)}
+              onClick={() => {
+                setSelectedMemberIds([])
+                setCurrentStep(1)
+              }}
               className="h-8 flex items-center gap-1.5 text-xs font-semibold text-slate-200 hover:text-white px-3 rounded-full bg-white/10 hover:bg-white/20 border border-white/20 transition-all active:scale-95"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
@@ -861,12 +988,12 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
             </div>
 
             <button
-              onClick={handleQuickPassAllInTeam}
+              onClick={() => handleOpenBatchModal()}
               className="h-8 px-3 rounded-full bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-sm border border-emerald-400/30 transition-all active:scale-95"
-              title="ตรวจผ่านทุกคนที่เหลือในทีม"
+              title="ตรวจผ่านแบบกลุ่ม"
             >
               <Zap className="w-3.5 h-3.5 fill-white" />
-              <span>ผ่านทั้งทีม</span>
+              <span>{selectedMemberIds.length > 0 ? `ผ่านที่เลือก (${selectedMemberIds.length})` : 'ผ่านทั้งทีม'}</span>
             </button>
           </div>
 
@@ -911,6 +1038,49 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                 className="w-full h-9 text-xs pl-9 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-900 font-normal placeholder:text-slate-500"
               />
             </div>
+
+            {/* Selection Toolbar (when pending members exist and not in checked tab) */}
+            {pendingMembersInTeam.length > 0 && memberStatusFilter !== 'checked' && (
+              <div className="flex items-center justify-between pt-1 border-t border-slate-100 text-xs">
+                <button
+                  type="button"
+                  onClick={handleToggleSelectAll}
+                  className="flex items-center gap-1.5 text-slate-700 hover:text-slate-950 font-medium active:scale-95 transition-all py-0.5"
+                >
+                  <span className={`w-4 h-4 rounded border flex items-center justify-center transition-colors ${
+                    selectedMemberIds.length === pendingMembersInTeam.length && pendingMembersInTeam.length > 0
+                      ? 'bg-emerald-600 border-emerald-600 text-white'
+                      : selectedMemberIds.length > 0
+                      ? 'bg-emerald-100 border-emerald-500 text-emerald-700'
+                      : 'border-slate-300 bg-white'
+                  }`}>
+                    {selectedMemberIds.length === pendingMembersInTeam.length && pendingMembersInTeam.length > 0 ? (
+                      <Check className="w-3 h-3 stroke-[3]" />
+                    ) : selectedMemberIds.length > 0 ? (
+                      <span className="w-2 h-0.5 bg-emerald-600 rounded-full" />
+                    ) : null}
+                  </span>
+                  <span>
+                    {selectedMemberIds.length === pendingMembersInTeam.length
+                      ? 'เลือกทั้งหมด'
+                      : selectedMemberIds.length === 0
+                      ? 'เลือกทั้งหมด'
+                      : `เลือกแล้ว ${selectedMemberIds.length}/${pendingMembersInTeam.length} คน`}
+                  </span>
+                </button>
+
+                {selectedMemberIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleOpenBatchModal(selectedMemberIds)}
+                    className="text-xs font-bold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg flex items-center gap-1 shadow-2xs active:scale-95 transition-all"
+                  >
+                    <Zap className="w-3.5 h-3.5 fill-emerald-600 text-emerald-600" />
+                    <span>ผ่านที่เลือก ({selectedMemberIds.length})</span>
+                  </button>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Members List (Scrollable cards in Frame 5) */}
@@ -951,7 +1121,10 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                       </button>
                       <button
                         type="button"
-                        onClick={() => setCurrentStep(1)}
+                        onClick={() => {
+                          setSelectedMemberIds([])
+                          setCurrentStep(1)
+                        }}
                         className="w-full h-9 rounded-xl text-slate-600 hover:text-slate-900 text-xs font-normal"
                       >
                         ← กลับไปเลือกสังกัดอื่น
@@ -976,20 +1149,41 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                 return (
                   <div
                     key={member.id}
-                    onClick={() => handleOpenFormForContractor(member)}
-                    className={`bg-white rounded-xl p-2.5 border shadow-2xs hover:border-slate-400 cursor-pointer active:scale-[0.99] transition-all flex items-center justify-between gap-2 ${
+                    className={`bg-white rounded-xl p-2.5 border shadow-2xs transition-all flex items-center justify-between gap-2 ${
                       isChecked
                         ? isSafe
                           ? 'border-emerald-300 bg-emerald-50/20'
                           : 'border-red-300 bg-red-50/20'
-                        : 'border-slate-300 hover:border-blue-400'
+                        : 'border-slate-300'
                     }`}
                   >
-                    {/* Left: Index & Member Info */}
-                    <div className="flex items-center gap-2.5 flex-1 min-w-0">
-                      <span className="w-7 h-7 rounded-full bg-slate-200 text-slate-900 text-xs font-semibold flex items-center justify-center shrink-0 border border-slate-300">
-                        {idx + 1}
-                      </span>
+                    {/* Left: Checkbox / Index & Member Info */}
+                    <div className="flex items-center gap-2 flex-1 min-w-0">
+                      {!isChecked ? (
+                        <button
+                          type="button"
+                          onClick={(e) => handleToggleSelectMember(member.id, e)}
+                          className="w-8 h-8 rounded-lg border flex items-center justify-center shrink-0 transition-all active:scale-95"
+                          style={{ minWidth: '32px' }}
+                          title={selectedMemberIds.includes(member.id) ? 'ยกเลิกเลือก' : 'เลือกช่างคนนี้'}
+                        >
+                          <span className={`w-5 h-5 rounded-md border flex items-center justify-center transition-colors ${
+                            selectedMemberIds.includes(member.id)
+                              ? 'bg-emerald-600 border-emerald-600 text-white shadow-2xs'
+                              : 'border-slate-300 bg-white hover:border-slate-400 text-slate-500'
+                          }`}>
+                            {selectedMemberIds.includes(member.id) ? (
+                              <Check className="w-3.5 h-3.5 stroke-[3]" />
+                            ) : (
+                              <span className="text-[11px] font-bold text-slate-500">{idx + 1}</span>
+                            )}
+                          </span>
+                        </button>
+                      ) : (
+                        <span className="w-8 h-8 rounded-full bg-slate-200 text-slate-900 text-xs font-semibold flex items-center justify-center shrink-0 border border-slate-300" style={{ minWidth: '32px' }}>
+                          {idx + 1}
+                        </span>
+                      )}
 
                       <div className="min-w-0 flex-1">
                         <div className="flex items-center gap-1.5 flex-wrap">
@@ -1008,7 +1202,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                           {isChecked ? (
                             isSafe ? (
                               <span className="text-emerald-800 font-semibold flex items-center gap-1">
-                                <CheckCircle2 className="w-3.5 h-3.5 inline text-emerald-700" /> เข้า {entry.check_in_time ? entry.check_in_time.substring(0, 5) : '08:00'} น. • ผ่าน
+                                <CheckCircle2 className="w-3.5 h-3.5 inline text-emerald-700" /> ผ่านเรียบร้อย
                               </span>
                             ) : (
                               <span className="text-red-700 font-semibold flex items-center gap-1">
@@ -1031,23 +1225,40 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                       </div>
                     </div>
 
-                    {/* Right: Actions */}
+                    {/* Right: Actions (Only these buttons trigger actions) */}
                     <div className="flex items-center gap-1.5 shrink-0">
-                      {!isChecked && (
+                      {!isChecked ? (
                         <button
+                          type="button"
                           onClick={e => handleQuickPassMember(member, e)}
                           disabled={savingQuickId === member.id}
-                          className="h-8 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-xs font-semibold flex items-center gap-1 shadow-2xs transition-colors"
+                          className="h-8 px-2.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white text-xs font-semibold flex items-center gap-1 shadow-2xs transition-all"
                           title="ตรวจผ่านด่วน 1-Tap"
                         >
                           <Zap className="w-3.5 h-3.5 fill-white" />
                           <span>ผ่าน</span>
                         </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={e => handleCancelEntry(member, entry, e)}
+                          disabled={deletingId === entry.id}
+                          className="h-8 px-2.5 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-700 text-xs font-semibold flex items-center gap-1 border border-rose-300 transition-all"
+                          title="ยกเลิกการตรวจ คืนสถานะเป็นยังไม่ตรวจ"
+                        >
+                          {deletingId === entry.id ? (
+                            <RefreshCw className="w-3.5 h-3.5 animate-spin text-rose-600" />
+                          ) : (
+                            <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
+                          )}
+                          <span>ยกเลิก</span>
+                        </button>
                       )}
 
                       <button
+                        type="button"
                         onClick={() => handleOpenFormForContractor(member)}
-                        className="h-8 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-normal flex items-center gap-1 border border-slate-300"
+                        className="h-8 px-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 active:scale-95 text-slate-800 text-xs font-medium flex items-center gap-1 border border-slate-300 transition-all"
                         title="เปิดฟอร์มตรวจละเอียด"
                       >
                         <span>ตรวจเช็ค</span>
@@ -1108,36 +1319,28 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                   ตำแหน่ง: {cleanContractorPosition(selectedContractor.position)}
                 </p>
               )}
+              {getEntryForContractor(selectedContractor) && (
+                <div className="flex items-center justify-between pt-2 mt-2 border-t border-slate-200">
+                  <span className="text-xs text-emerald-800 font-semibold flex items-center gap-1">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" /> บันทึกการตรวจแล้ว
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ent = getEntryForContractor(selectedContractor)
+                      if (ent) handleCancelEntry(selectedContractor, ent)
+                    }}
+                    disabled={deletingId === getEntryForContractor(selectedContractor)?.id}
+                    className="text-xs text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-300 px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 transition-colors"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>ยกเลิกการตรวจคนนี้</span>
+                  </button>
+                </div>
+              )}
             </div>
 
-            {/* 1. Time Check-in / Out */}
-            <div className="bg-white p-2.5 rounded-xl border border-slate-300 shadow-2xs space-y-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-900">
-                <Clock className="w-3.5 h-3.5 text-blue-600" />
-                <span>เวลาเข้า - ออกงาน</span>
-              </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-xs text-slate-700 font-normal mb-1 block">เวลาเข้า</label>
-                  <input
-                    type="time"
-                    value={formCheckIn}
-                    onChange={e => setFormCheckIn(e.target.value)}
-                    className="w-full h-9 text-xs font-normal px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 focus:bg-white"
-                  />
-                </div>
-                <div>
-                  <label className="text-xs text-slate-700 font-normal mb-1 block">เวลาออก</label>
-                  <input
-                    type="time"
-                    value={formCheckOut}
-                    onChange={e => setFormCheckOut(e.target.value)}
-                    className="w-full h-9 text-xs font-normal px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 focus:bg-white"
-                  />
-                </div>
-              </div>
-            </div>
 
             {/* 2. Project, Activity/Task & Location */}
             <div className="bg-white p-2.5 rounded-xl border border-slate-300 shadow-2xs space-y-2.5">
@@ -1189,62 +1392,73 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                   </div>
                 </div>
 
-                {/* งานที่ปฏิบัติ (Task) */}
+                {/* งานที่ปฏิบัติ (Task) - แถวเดียว สะอาดตา */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs text-slate-700 font-semibold">งานที่ปฏิบัติ</label>
-                    <span className="text-[11px] text-blue-700">
+                    <span className="text-[11px] text-blue-700 font-medium">
                       {tasksForSelectedActivity.length > 0 ? `${tasksForSelectedActivity.length} งานในโครงการนี้` : 'ตามโครงการ'}
                     </span>
                   </div>
-                  <div className="relative flex items-center mb-1">
-                    <select
-                      value={
-                        tasksForSelectedActivity.includes(formActivityName)
-                          ? formActivityName
-                          : formActivityName
-                          ? '__custom_val__'
-                          : ''
-                      }
-                      onChange={e => {
-                        const val = e.target.value
-                        if (val === '__custom_val__') {
-                          // keep
-                        } else if (val === '__custom__') {
-                          setFormActivityName('')
-                        } else {
-                          setFormActivityName(val)
-                        }
-                      }}
-                      className="w-full h-9 text-xs pl-2.5 pr-8 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal appearance-none truncate focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    >
-                      <option value="">-- เลือกงานที่ปฏิบัติในโครงการนี้ --</option>
-                      {tasksForSelectedActivity.map(t => (
-                        <option key={t} value={t}>
-                          {t}
-                        </option>
-                      ))}
-                      {formActivityName && !tasksForSelectedActivity.includes(formActivityName) && (
-                        <option value="__custom_val__">{formActivityName} (ระบุเอง)</option>
-                      )}
-                      <option value="__custom__">+ พิมพ์ระบุงานเอง...</option>
-                    </select>
-                    <ChevronDown className="w-4 h-4 text-slate-500 absolute right-2.5 pointer-events-none" />
-                  </div>
 
-                  <input
-                    type="text"
-                    list="mobile-tasks-list"
-                    placeholder="หรือพิมพ์ระบุชื่องานที่ปฏิบัติเอง..."
-                    value={formActivityName}
-                    onChange={e => setFormActivityName(e.target.value)}
-                    className="w-full h-8 text-xs px-2.5 rounded-lg border border-slate-200 bg-slate-50 text-slate-800 font-normal focus:bg-white focus:border-slate-400"
-                  />
-                  <datalist id="mobile-tasks-list">
-                    {tasksForSelectedActivity.map(t => (
-                      <option key={t} value={t} />
-                    ))}
-                  </datalist>
+                  {isCustomFormTask ? (
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="พิมพ์ระบุชื่องานที่ปฏิบัติ..."
+                        value={formActivityName}
+                        onChange={e => setFormActivityName(e.target.value)}
+                        className="flex-1 h-9 text-xs px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        autoFocus
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setIsCustomFormTask(false)
+                          setFormActivityName(tasksForSelectedActivity[0] || '')
+                        }}
+                        className="h-9 px-2.5 rounded-lg border border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium shrink-0"
+                      >
+                        เลือกจากรายการ
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="relative flex items-center">
+                      <select
+                        value={
+                          tasksForSelectedActivity.includes(formActivityName)
+                            ? formActivityName
+                            : formActivityName
+                            ? '__custom_val__'
+                            : ''
+                        }
+                        onChange={e => {
+                          const val = e.target.value
+                          if (val === '__custom__') {
+                            setIsCustomFormTask(true)
+                            setFormActivityName('')
+                          } else if (val === '__custom_val__') {
+                            // keep
+                          } else {
+                            setFormActivityName(val)
+                          }
+                        }}
+                        className="w-full h-9 text-xs pl-2.5 pr-8 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal appearance-none truncate focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      >
+                        <option value="">-- เลือกงานที่ปฏิบัติในโครงการนี้ --</option>
+                        {tasksForSelectedActivity.map(t => (
+                          <option key={t} value={t}>
+                            {t}
+                          </option>
+                        ))}
+                        {formActivityName && !tasksForSelectedActivity.includes(formActivityName) && (
+                          <option value="__custom_val__">{formActivityName} (ระบุเอง)</option>
+                        )}
+                        <option value="__custom__">+ พิมพ์ระบุงานเอง...</option>
+                      </select>
+                      <ChevronDown className="w-4 h-4 text-slate-500 absolute right-2.5 pointer-events-none" />
+                    </div>
+                  )}
                 </div>
 
                 {/* สถานที่ */}
@@ -1409,7 +1623,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                     onChange={e => setFormShirt(e.target.checked)}
                     className="rounded text-emerald-600 focus:ring-0 w-4 h-4"
                   />
-                  <span>👕 เสื้อแขนยาว</span>
+                  <span>🥽 แว่นตา</span>
                 </label>
 
                 <label className={`flex items-center gap-2 p-2 rounded-lg border cursor-pointer transition-all ${
@@ -1446,86 +1660,68 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
               </div>
 
               <div className="space-y-2">
+                {/* แจ้งความประสงค์ - แถวเดียว พร้อมตัวเลือกเฉพาะที่ไม่ได้วงไว้ */}
                 <div>
-                  <label className="text-xs text-slate-700 font-semibold mb-1 block">แจ้งความประสงค์ (เลือกรายการด่วนหรือพิมพ์เอง)</label>
-                  
-                  {/* Quick Dropdown Preset Selector */}
-                  <div className="relative flex items-center mb-1.5">
-                    <select
-                      value=""
-                      onChange={e => {
-                        if (e.target.value) {
-                          setFormPurpose(e.target.value)
-                        }
-                      }}
-                      className="w-full h-9 text-xs pl-2.5 pr-8 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal appearance-none truncate focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    >
-                      <option value="">-- เลือกจากรายการแจ้งความประสงค์ด่วน --</option>
-                      {PURPOSE_PRESETS.map(p => (
-                        <option key={p} value={p}>
-                          {p}
-                        </option>
-                      ))}
-                    </select>
-                    <ChevronDown className="w-4 h-4 text-slate-500 absolute right-2.5 pointer-events-none" />
-                  </div>
+                  <label className="text-xs text-slate-700 font-semibold mb-1 block">แจ้งความประสงค์</label>
 
-                  {/* Quick Chips for Top Frequent Reasons */}
-                  <div className="flex flex-wrap gap-1 mb-1.5">
-                    {['ไม่มา', 'ขอเข้า 08:30', 'ขอเข้า 09:00', 'ขอออกก่อนเวลา', 'ขอทำงาน OT', 'ปกติ'].map(tag => {
-                      const isSelected = formPurpose.includes(tag) || (tag === 'ปกติ' && formPurpose === 'เข้าปฏิบัติงานตามปกติ')
-                      return (
-                        <button
-                          key={tag}
-                          type="button"
-                          onClick={() => {
-                            if (tag === 'ปกติ') {
-                              setFormPurpose(formPurpose === 'เข้าปฏิบัติงานตามปกติ' ? '' : 'เข้าปฏิบัติงานตามปกติ')
-                            } else if (tag === 'ขอออกก่อนเวลา') {
-                              setFormPurpose(formPurpose === 'ขอออกก่อนเวลา (16:00)' ? '' : 'ขอออกก่อนเวลา (16:00)')
-                            } else if (tag === 'ขอทำงาน OT') {
-                              setFormPurpose(formPurpose === 'ขอทำงานล่วงเวลา (OT ถึง 20:00)' ? '' : 'ขอทำงานล่วงเวลา (OT ถึง 20:00)')
-                            } else {
-                              setFormPurpose(formPurpose === tag ? '' : tag)
-                            }
-                          }}
-                          className={`text-[11px] px-2 py-0.5 rounded-md border transition-all ${
-                            isSelected
-                              ? 'bg-blue-600 text-white border-blue-700 font-semibold shadow-2xs'
-                              : 'bg-slate-100 text-slate-700 border-slate-200 hover:bg-slate-200'
-                          }`}
-                        >
-                          {tag}
-                        </button>
-                      )
-                    })}
-                    {formPurpose && (
+                  {isCustomPurpose ? (
+                    <div className="flex gap-1.5">
+                      <input
+                        type="text"
+                        placeholder="พิมพ์ระบุแจ้งความประสงค์..."
+                        value={formPurpose}
+                        onChange={e => setFormPurpose(e.target.value)}
+                        className="flex-1 h-9 text-xs px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                        autoFocus
+                      />
                       <button
                         type="button"
-                        onClick={() => setFormPurpose('')}
-                        className="text-[11px] px-2 py-0.5 rounded-md border border-red-200 bg-red-50 text-red-600 hover:bg-red-100"
+                        onClick={() => {
+                          setIsCustomPurpose(false)
+                          setFormPurpose('')
+                        }}
+                        className="h-9 px-2.5 rounded-lg border border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium shrink-0"
                       >
-                        ล้าง
+                        เลือกจากรายการ
                       </button>
-                    )}
-                  </div>
-
-                  {/* Custom Text Input with Datalist */}
-                  <div className="relative flex items-center">
-                    <input
-                      type="text"
-                      list="mobile-purpose-datalist"
-                      placeholder="หรือระบุข้อความแจ้งความประสงค์..."
-                      value={formPurpose}
-                      onChange={e => setFormPurpose(e.target.value)}
-                      className="w-full h-9 text-xs px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                    />
-                    <datalist id="mobile-purpose-datalist">
-                      {PURPOSE_PRESETS.map(p => (
-                        <option key={p} value={p} />
-                      ))}
-                    </datalist>
-                  </div>
+                    </div>
+                  ) : (
+                    <div className="relative flex items-center">
+                      <select
+                        value={
+                          PURPOSE_PRESETS.includes(formPurpose)
+                            ? formPurpose
+                            : formPurpose
+                            ? '__custom_val__'
+                            : ''
+                        }
+                        onChange={e => {
+                          const val = e.target.value
+                          if (val === '__custom__') {
+                            setIsCustomPurpose(true)
+                            setFormPurpose('')
+                          } else if (val === '__custom_val__') {
+                            // keep
+                          } else {
+                            setFormPurpose(val)
+                          }
+                        }}
+                        className="w-full h-9 text-xs pl-2.5 pr-8 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal appearance-none truncate focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      >
+                        <option value="">-- ไม่ระบุ / เลือกแจ้งความประสงค์ --</option>
+                        {PURPOSE_PRESETS.map(p => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                        {formPurpose && !PURPOSE_PRESETS.includes(formPurpose) && (
+                          <option value="__custom_val__">{formPurpose} (ระบุเอง)</option>
+                        )}
+                        <option value="__custom__">+ พิมพ์ระบุเอง...</option>
+                      </select>
+                      <ChevronDown className="w-4 h-4 text-slate-500 absolute right-2.5 pointer-events-none" />
+                    </div>
+                  )}
                 </div>
 
                 <div>
@@ -1573,6 +1769,284 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
             </button>
           </div>
 
+        </div>
+      )}
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          BATCH CHECKLIST MODAL (เลือกโครงการ/กิจกรรม/สถานที่ ก่อนกดผ่านทั้งหมด)
+      ────────────────────────────────────────────────────────────────────────── */}
+      {isBatchModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="bg-white w-full max-w-lg rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col max-h-[92vh] overflow-hidden animate-in fade-in slide-in-from-bottom duration-200">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-slate-950 via-slate-900 to-slate-950 text-white px-4 py-3 shrink-0 flex items-center justify-between border-b border-slate-800">
+              <div className="flex items-center gap-2">
+                <div className="w-7 h-7 rounded-lg bg-emerald-600/30 border border-emerald-500/40 flex items-center justify-center">
+                  <Zap className="w-4 h-4 text-emerald-400 fill-emerald-400" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-white leading-tight">
+                    ตรวจผ่านแบบกลุ่ม ({selectedMemberIds.length} คน)
+                  </h2>
+                  <p className="text-[11px] text-slate-300 font-normal">
+                    สังกัด: {selectedCompany}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsBatchModalOpen(false)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-300 hover:text-white flex items-center justify-center transition-colors"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body (Scrollable) */}
+            <div className="flex-1 overflow-y-auto p-3.5 space-y-3 scrollbar-thin">
+              {/* 1. Selected Members Chips */}
+              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-1.5">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-blue-600" />
+                    <span>รายชื่อช่างที่เลือก ({selectedMemberIds.length} คน)</span>
+                  </label>
+                  <span className="text-[11px] text-slate-500">กด × เพื่อเอาออก</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto p-1">
+                  {contractors.filter(c => selectedMemberIds.includes(c.id)).map(c => (
+                    <span
+                      key={c.id}
+                      className="inline-flex items-center gap-1 text-xs bg-white text-slate-800 border border-slate-300 px-2 py-0.5 rounded-full shadow-2xs"
+                    >
+                      <span className="truncate max-w-[120px]">{c.name}</span>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSelectMember(c.id)}
+                        className="text-slate-400 hover:text-rose-600 focus:outline-none"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* 2. Project / Activity */}
+              <div>
+                <label className="text-xs text-slate-700 font-semibold mb-1 block flex items-center gap-1">
+                  <Briefcase className="w-3.5 h-3.5 text-blue-600" />
+                  <span>โครงการ (กิจกรรมหลัก) *</span>
+                </label>
+                <div className="relative flex items-center">
+                  <select
+                    value={batchActivityId}
+                    onChange={e => handleBatchActivityChange(e.target.value)}
+                    className="w-full h-9 text-xs pl-2.5 pr-8 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal appearance-none truncate focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                  >
+                    <option value="">-- เลือกโครงการ / กิจกรรม --</option>
+                    {activities.map(a => (
+                      <option key={a.id} value={a.id}>
+                        {a.code ? `[${a.code}] ` : ''}{a.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-4 h-4 text-slate-500 absolute right-2.5 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* 3. Task (งานที่ปฏิบัติ - แถวเดียว สะอาดตา) */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs text-slate-700 font-semibold">งานที่ปฏิบัติ</label>
+                  <span className="text-[11px] text-blue-700 font-medium">
+                    {tasksForBatchActivity.length > 0 ? `${tasksForBatchActivity.length} งานในโครงการนี้` : 'ตามโครงการ'}
+                  </span>
+                </div>
+
+                {isCustomBatchTask ? (
+                  <div className="flex gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="พิมพ์ระบุชื่องานที่ปฏิบัติ..."
+                      value={batchActivityName}
+                      onChange={e => setBatchActivityName(e.target.value)}
+                      className="flex-1 h-9 text-xs px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsCustomBatchTask(false)
+                        setBatchActivityName(tasksForBatchActivity[0] || '')
+                      }}
+                      className="h-9 px-2.5 rounded-lg border border-slate-300 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium shrink-0"
+                    >
+                      เลือกจากรายการ
+                    </button>
+                  </div>
+                ) : (
+                  <div className="relative flex items-center">
+                    <select
+                      value={
+                        tasksForBatchActivity.includes(batchActivityName)
+                          ? batchActivityName
+                          : batchActivityName
+                          ? '__custom_val__'
+                          : ''
+                      }
+                      onChange={e => {
+                        const val = e.target.value
+                        if (val === '__custom__') {
+                          setIsCustomBatchTask(true)
+                          setBatchActivityName('')
+                        } else if (val === '__custom_val__') {
+                          // keep
+                        } else {
+                          setBatchActivityName(val)
+                        }
+                      }}
+                      className="w-full h-9 text-xs pl-2.5 pr-8 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal appearance-none truncate focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                    >
+                      <option value="">-- เลือกงานที่ปฏิบัติในโครงการนี้ --</option>
+                      {tasksForBatchActivity.map(t => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                      {batchActivityName && !tasksForBatchActivity.includes(batchActivityName) && (
+                        <option value="__custom_val__">{batchActivityName} (ระบุเอง)</option>
+                      )}
+                      <option value="__custom__">+ พิมพ์ระบุงานเอง...</option>
+                    </select>
+                    <ChevronDown className="w-4 h-4 text-slate-500 absolute right-2.5 pointer-events-none" />
+                  </div>
+                )}
+              </div>
+
+              {/* 4. Location */}
+              <div>
+                <label className="text-xs text-slate-700 font-semibold mb-1 block flex items-center gap-1">
+                  <MapPin className="w-3.5 h-3.5 text-blue-600" />
+                  <span>สถานที่ปฏิบัติงาน</span>
+                </label>
+                <input
+                  type="text"
+                  value={batchLocation}
+                  onChange={e => setBatchLocation(e.target.value)}
+                  placeholder="ระบุสถานที่ทำงาน..."
+                  className="w-full h-9 text-xs px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              {/* 5. Supervisor & Times */}
+              <div>
+                <label className="text-xs text-slate-700 font-semibold mb-1 block flex items-center gap-1">
+                  <User className="w-3.5 h-3.5 text-blue-600" />
+                  <span>ผู้ตรวจ / หัวหน้า</span>
+                </label>
+                <input
+                  type="text"
+                  value={batchSupervisor}
+                  onChange={e => setBatchSupervisor(e.target.value)}
+                  placeholder="ชื่อผู้ตรวจ..."
+                  className="w-full h-9 text-xs px-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 focus:outline-none"
+                />
+              </div>
+
+              {/* 6. PPE & Alcohol */}
+              <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-semibold text-slate-800 flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>อุปกรณ์ความปลอดภัย (PPE)</span>
+                  </label>
+                  <span className="text-[11px] text-emerald-700 font-semibold">แอลกอฮอล์: 0% ผ่าน</span>
+                </div>
+                <div className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setBatchHelmet(!batchHelmet)}
+                    className={`h-8 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all ${
+                      batchHelmet ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'
+                    }`}
+                  >
+                    {batchHelmet && <Check className="w-3 h-3 stroke-[3]" />}
+                    <span>หมวก</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBatchVest(!batchVest)}
+                    className={`h-8 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all ${
+                      batchVest ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'
+                    }`}
+                  >
+                    {batchVest && <Check className="w-3 h-3 stroke-[3]" />}
+                    <span>เสื้อกั๊ก</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBatchShirt(!batchShirt)}
+                    className={`h-8 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all ${
+                      batchShirt ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'
+                    }`}
+                  >
+                    {batchShirt && <Check className="w-3 h-3 stroke-[3]" />}
+                    <span>แว่นตา</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBatchGloves(!batchGloves)}
+                    className={`h-8 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all ${
+                      batchGloves ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'
+                    }`}
+                  >
+                    {batchGloves && <Check className="w-3 h-3 stroke-[3]" />}
+                    <span>ถุงมือ</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setBatchShoes(!batchShoes)}
+                    className={`h-8 rounded-lg text-xs font-medium border flex items-center justify-center gap-1 transition-all ${
+                      batchShoes ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white text-slate-600 border-slate-300'
+                    }`}
+                  >
+                    {batchShoes && <Check className="w-3 h-3 stroke-[3]" />}
+                    <span>รองเท้า</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-white border-t border-slate-200 shrink-0 grid grid-cols-2 gap-2.5">
+              <button
+                type="button"
+                onClick={() => setIsBatchModalOpen(false)}
+                className="h-10 rounded-xl border border-slate-300 text-slate-700 bg-slate-50 hover:bg-slate-100 text-xs font-semibold"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                disabled={isSavingBatch || selectedMemberIds.length === 0}
+                onClick={handleConfirmBatchPass}
+                className="h-10 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50"
+              >
+                {isSavingBatch ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>กำลังบันทึก...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-4 h-4 fill-white" />
+                    <span>ยืนยันตรวจผ่าน {selectedMemberIds.length} คน</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
         </div>
       )}
 

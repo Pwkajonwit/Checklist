@@ -184,7 +184,7 @@ export function buildDailyReportData(
             const missingPpe: string[] = []
             if (!entry.ppe_helmet) missingPpe.push('หมวก')
             if (!entry.ppe_vest) missingPpe.push('กั๊ก')
-            if (!entry.ppe_shirt) missingPpe.push('เสื้อ')
+            if (!entry.ppe_shirt) missingPpe.push('แว่นตา')
             if (!entry.ppe_gloves) missingPpe.push('ถุงมือ')
             if (!entry.ppe_shoes) missingPpe.push('รองเท้า')
             reasons.push(`ขาด ${missingPpe.join('/')}`)

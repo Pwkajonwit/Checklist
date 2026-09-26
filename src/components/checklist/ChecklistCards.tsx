@@ -14,8 +14,8 @@ import { getContractorAlcRisk, isAlcoholFailed, isAlcoholUnchecked } from '@/lib
 const PPEStrip = ({ entry }: { entry: ChecklistEntry }) => {
   const items = [
     { label: 'หมวก',    v: entry.ppe_helmet },
-    { label: 'เวนดิ',   v: entry.ppe_vest   },
-    { label: 'เสื้อ',   v: entry.ppe_shirt  },
+    { label: 'กั๊ก',    v: entry.ppe_vest   },
+    { label: 'แว่นตา',  v: entry.ppe_shirt  },
     { label: 'ถุงมือ',  v: entry.ppe_gloves },
     { label: 'รองเท้า', v: entry.ppe_shoes  },
   ]
