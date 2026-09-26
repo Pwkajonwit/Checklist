@@ -61,34 +61,22 @@ export default function ActivitiesPage() {
     else setRefreshing(true)
 
     try {
-      const { data, error } = await supabase
-        .from('activities')
-        .select('*')
-        .order('name')
-
-      if (error) {
-        const pgErr = error as { message?: string; code?: string; details?: string }
-        if (!pgErr?.message && !pgErr?.code) {
-          console.warn('Fetch activities aborted or empty error')
-          return
-        }
-        throw error
+      const res = await fetch('/api/activities')
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.error || 'ไม่สามารถโหลดข้อมูลได้')
       }
-
+      const { data } = await res.json()
       setActivities(data ?? [])
     } catch (err: unknown) {
-      const pgErr = err as { message?: string; code?: string; details?: string }
-      if (!pgErr?.message && !pgErr?.code && !(err instanceof Error)) {
-        return
-      }
-      const message = pgErr?.message || (err instanceof Error ? err.message : 'ไม่สามารถโหลดข้อมูลได้')
-      console.error('Fetch activities error:', message, pgErr?.code, err)
+      const message = err instanceof Error ? err.message : 'ไม่สามารถโหลดข้อมูลได้'
+      console.error('Fetch activities error:', message, err)
       toast.error('เกิดข้อผิดพลาดในการโหลดข้อมูล', { description: message })
     } finally {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [supabase])
+  }, [])
 
   useEffect(() => {
     fetchData()
@@ -202,30 +190,24 @@ export default function ActivitiesPage() {
     }
 
     try {
-      let result = editId
-        ? await supabase.from('activities').update(payloadFull).eq('id', editId)
-        : await supabase.from('activities').insert(payloadFull)
+      const url = editId ? `/api/activities/${editId}` : '/api/activities'
+      const method = editId ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadFull),
+      })
 
-      if (result.error && result.error.message.includes('tasks')) {
-        result = editId
-          ? await supabase.from('activities').update(payloadWithoutTasks).eq('id', editId)
-          : await supabase.from('activities').insert(payloadWithoutTasks)
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error ?? 'เกิดข้อผิดพลาดในการบันทึก')
       }
-
-      if (result.error && result.error.message.includes('code')) {
-        result = editId
-          ? await supabase.from('activities').update(payloadBasic).eq('id', editId)
-          : await supabase.from('activities').insert(payloadBasic)
-      }
-
-      if (result.error) throw result.error
 
       toast.success(editId ? 'แก้ไขข้อมูลกิจกรรมเรียบร้อยแล้ว' : 'เพิ่มกิจกรรมเรียบร้อยแล้ว')
       setDialogOpen(false)
       fetchData(true)
     } catch (err: unknown) {
-      const pgErr = err as { message?: string; details?: string; code?: string }
-      const message = pgErr?.message || (err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการบันทึก')
+      const message = err instanceof Error ? err.message : 'เกิดข้อผิดพลาดในการบันทึก'
       toast.error('บันทึกไม่สำเร็จ', { description: message })
     } finally {
       setSaving(false)
@@ -235,8 +217,11 @@ export default function ActivitiesPage() {
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`ต้องการลบกิจกรรม "${name}" หรือไม่?`)) return
     try {
-      const { error } = await supabase.from('activities').delete().eq('id', id)
-      if (error) throw error
+      const res = await fetch(`/api/activities/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error ?? 'ลบไม่สำเร็จ')
+      }
       toast.success(`ลบกิจกรรม "${name}" สำเร็จ`)
       setActivities(prev => prev.filter(a => a.id !== id))
     } catch (err: unknown) {
@@ -248,21 +233,23 @@ export default function ActivitiesPage() {
   const handleToggleActive = async (a: Activity) => {
     const nextStatus = !a.is_active
     try {
-      const { error } = await supabase
-        .from('activities')
-        .update({ is_active: nextStatus })
-        .eq('id', a.id)
-
-      if (error) throw error
+      const res = await fetch(`/api/activities/${a.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: nextStatus }),
+      })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error ?? 'เปลี่ยนสถานะไม่สำเร็จ')
+      }
       toast.success(nextStatus ? `เปิดใช้งาน "${a.name}" แล้ว` : `ปิดใช้งาน "${a.name}" แล้ว`)
-      setActivities(prev =>
-        prev.map(item => (item.id === a.id ? { ...item, is_active: nextStatus } : item))
-      )
+      setActivities(prev => prev.map(item => item.id === a.id ? { ...item, is_active: nextStatus } : item))
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'เกิดข้อผิดพลาด'
       toast.error('เปลี่ยนสถานะไม่สำเร็จ', { description: message })
     }
   }
+
 
   return (
     <div className="flex flex-col flex-1 min-h-0 h-full gap-2 overflow-hidden">

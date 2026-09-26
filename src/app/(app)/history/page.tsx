@@ -50,9 +50,14 @@ export default function HistoryPage() {
   useEffect(() => { fetchEntries() }, [fetchEntries])
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from('checklist_entries').delete().eq('id', id)
-    if (error) toast.error('ลบไม่สำเร็จ')
-    else { toast.success('ลบรายการแล้ว'); fetchEntries() }
+    try {
+      const res = await fetch(`/api/checklist/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('ลบไม่สำเร็จ')
+      toast.success('ลบรายการแล้ว')
+      fetchEntries()
+    } catch {
+      toast.error('ลบไม่สำเร็จ')
+    }
   }
 
   const setPresetRange = (type: '7d' | '30d' | 'thisMonth') => {

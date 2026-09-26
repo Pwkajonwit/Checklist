@@ -4,7 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import type { ChecklistEntry } from '@/lib/types'
-import { isAlcoholFailed } from '@/lib/types'
+import { isAlcoholFailed, isAlcoholPassed, isAlcoholUnchecked } from '@/lib/types'
 import { format, subDays, startOfMonth, endOfMonth } from 'date-fns'
 import {
   History, Search, RefreshCw, Calendar, AlertTriangle, ShieldAlert,
@@ -369,13 +369,17 @@ export function MobileHistoryView({ onOpenAuth, mobileUser }: MobileHistoryViewP
                   {/* Alcohol Result */}
                   <div className="flex items-center gap-1.5">
                     <span className="text-xs text-slate-700 font-normal">ALC:</span>
-                    {hasAlcFail ? (
+                    {isAlcoholUnchecked(entry.alc_result) ? (
+                      <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-normal text-xs border border-slate-300">
+                        ยังไม่ได้ตรวจ
+                      </span>
+                    ) : hasAlcFail ? (
                       <span className="px-2 py-0.5 rounded bg-red-100 text-red-950 font-bold text-xs border border-red-300">
-                        {entry.alc_result || 'ไม่ผ่าน'}
+                        {entry.alc_result || 'ไม่ผ่าน'} (เกินเกณฑ์)
                       </span>
                     ) : (
                       <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-950 font-semibold text-xs border border-emerald-300">
-                        {entry.alc_result || '0.0 mg%'}
+                        {entry.alc_result || '0'} mg% (ปกติ)
                       </span>
                     )}
                   </div>

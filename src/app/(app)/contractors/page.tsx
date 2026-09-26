@@ -80,13 +80,19 @@ export default function ContractorsPage() {
     else setRefreshing(true)
 
     try {
-      const [{ data: cData, error: cErr }, { data: coData, error: coErr }] = await Promise.all([
-        supabase.from('contractors').select('*').order('name'),
-        supabase.from('companies').select('*').order('name'),
+      const [cRes, coRes] = await Promise.all([
+        fetch('/api/contractors'),
+        fetch('/api/companies'),
       ])
 
-      if (cErr) throw cErr
-      if (coErr) throw coErr
+      if (!cRes.ok || !coRes.ok) {
+        throw new Error('ไม่สามารถโหลดข้อมูลได้')
+      }
+
+      const [{ data: cData }, { data: coData }] = await Promise.all([
+        cRes.json(),
+        coRes.json(),
+      ])
 
       setContractors(cData ?? [])
       setCompanies(coData ?? [])
@@ -98,7 +104,7 @@ export default function ContractorsPage() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [supabase])
+  }, [])
 
   useEffect(() => {
     fetchData()
@@ -216,22 +222,20 @@ export default function ContractorsPage() {
     }
 
     try {
-      if (editId) {
-        let res = await supabase.from('contractors').update(payloadWithColumns).eq('id', editId)
-        if (res.error && res.error.code === 'PGRST204') {
-          res = await supabase.from('contractors').update(payloadFallback).eq('id', editId)
-        }
-        if (res.error) throw res.error
-        toast.success('แก้ไขข้อมูลช่างเรียบร้อยแล้ว')
-      } else {
-        let res = await supabase.from('contractors').insert(payloadWithColumns)
-        if (res.error && res.error.code === 'PGRST204') {
-          res = await supabase.from('contractors').insert(payloadFallback)
-        }
-        if (res.error) throw res.error
-        toast.success('เพิ่มข้อมูลช่างเรียบร้อยแล้ว')
+      const url = editId ? `/api/contractors/${editId}` : '/api/contractors'
+      const method = editId ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payloadWithColumns),
+      })
+
+      if (!res.ok) {
+        const errJson = await res.json()
+        throw new Error(errJson.error || 'บันทึกไม่สำเร็จ')
       }
 
+      toast.success(editId ? 'แก้ไขข้อมูลช่างเรียบร้อยแล้ว' : 'เพิ่มข้อมูลช่างเรียบร้อยแล้ว')
       setDialogOpen(false)
       fetchData(true)
     } catch (err: unknown) {
@@ -247,12 +251,16 @@ export default function ContractorsPage() {
   const handleToggleActive = async (c: Contractor) => {
     try {
       const nextActive = !c.is_active
-      const { error } = await supabase
-        .from('contractors')
-        .update({ is_active: nextActive, updated_at: new Date().toISOString() })
-        .eq('id', c.id)
+      const res = await fetch(`/api/contractors/${c.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: nextActive, updated_at: new Date().toISOString() }),
+      })
+      if (!res.ok) {
+        const errJson = await res.json()
+        throw new Error(errJson.error || 'ไม่สามารถเปลี่ยนสถานะได้')
+      }
 
-      if (error) throw error
       setContractors(prev => prev.map(item => item.id === c.id ? { ...item, is_active: nextActive } : item))
       toast.success(nextActive ? `เปิดใช้งาน ${c.name} แล้ว` : `ปิดการใช้งาน ${c.name} แล้ว`)
     } catch (err: unknown) {
@@ -266,8 +274,12 @@ export default function ContractorsPage() {
     if (!confirm(`ต้องการลบ "${name}" ออกจากระบบหรือไม่?`)) return
 
     try {
-      const { error } = await supabase.from('contractors').delete().eq('id', id)
-      if (error) throw error
+      const res = await fetch(`/api/contractors/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const errJson = await res.json()
+        throw new Error(errJson.error || 'ลบไม่สำเร็จ')
+      }
+
       toast.success(`ลบ "${name}" สำเร็จ`)
       setContractors(prev => prev.filter(c => c.id !== id))
     } catch (err: unknown) {

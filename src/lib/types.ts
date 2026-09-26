@@ -98,31 +98,33 @@ export const PURPOSE_PRESETS = [
   'เข้าปฏิบัติงานตามปกติ',
 ]
 
-export type ALCResult = string // e.g. '0', '>0', 'ไม่ได้ตรวจ', '0.02%', etc.
+export type ALCResult = string | null // ค่าตัวเลขปกติ เช่น '0', '25', หรือค่าว่าง null/'' เมื่อยังไม่ได้ตรวจ
+
+export const isAlcoholUnchecked = (val?: string | null): boolean => {
+  if (val === null || val === undefined) return true
+  const trimmed = String(val).trim()
+  return !trimmed || trimmed === 'ยังไม่ได้ตรวจ' || trimmed === 'ไม่ได้ตรวจ' || trimmed === '-'
+}
 
 export const isAlcoholPassed = (val?: string | null): boolean => {
-  if (!val) return true
-  const trimmed = val.trim()
-  if (!trimmed || trimmed === '0%' || trimmed === '0' || trimmed === '0.00' || trimmed === '0.00%' || trimmed === 'ไม่ได้ตรวจ') return true
+  if (isAlcoholUnchecked(val)) return false
+  const trimmed = String(val).trim()
   const num = parseFloat(trimmed.replace(/[%mg]/gi, '').trim())
   if (!isNaN(num)) return num === 0
-  return trimmed === '0%'
+  return trimmed === '0' || trimmed === '0%'
 }
 
 export const isAlcoholFailed = (val?: string | null): boolean => {
-  if (!val) return false
-  const trimmed = val.trim()
-  if (!trimmed || trimmed === 'ไม่ได้ตรวจ') return false
-  return !isAlcoholPassed(val)
+  if (isAlcoholUnchecked(val)) return false
+  const trimmed = String(val).trim()
+  const num = parseFloat(trimmed.replace(/[%mg]/gi, '').trim())
+  if (!isNaN(num)) return num > 0
+  return trimmed.startsWith('>') || trimmed.includes('เกิน')
 }
 
-export const normalizeAlcForDb = (val?: string | null): string => {
-  if (!val) return '0%'
-  const trimmed = val.trim()
-  if (!trimmed || trimmed === '0' || trimmed === '0%' || trimmed === '0.00' || trimmed === '0.00%') return '0%'
-  if (trimmed === 'ไม่ได้ตรวจ') return 'ไม่ได้ตรวจ'
-  if (isAlcoholFailed(trimmed)) return '>0%'
-  return '0%'
+export const normalizeAlcForDb = (val?: string | null): string | null => {
+  if (isAlcoholUnchecked(val)) return null
+  return String(val).trim()
 }
 
 export type EntryStatus = 'active' | 'checked_out' | 'cancelled'

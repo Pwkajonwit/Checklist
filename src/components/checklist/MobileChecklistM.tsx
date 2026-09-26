@@ -6,6 +6,7 @@ import type { ChecklistEntry, Contractor, Company, Activity, ALCResult } from '@
 import {
   isAlcoholPassed,
   isAlcoholFailed,
+  isAlcoholUnchecked,
   getContractorAlcRisk,
   getContractorDailyWage,
   cleanContractorPosition,
@@ -108,12 +109,12 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       fetchSupervisor()
     }
   }, [supabase, mobileUser])
-  const [formAlc, setFormAlc] = useState<string>('0')
-  const [formHelmet, setFormHelmet] = useState(true)
-  const [formVest, setFormVest] = useState(true)
-  const [formShirt, setFormShirt] = useState(true)
-  const [formGloves, setFormGloves] = useState(true)
-  const [formShoes, setFormShoes] = useState(true)
+  const [formAlc, setFormAlc] = useState<string>('')
+  const [formHelmet, setFormHelmet] = useState(false)
+  const [formVest, setFormVest] = useState(false)
+  const [formShirt, setFormShirt] = useState(false)
+  const [formGloves, setFormGloves] = useState(false)
+  const [formShoes, setFormShoes] = useState(false)
   const [formPurpose, setFormPurpose] = useState('')
   const [formNotes, setFormNotes] = useState('')
   const [savingForm, setSavingForm] = useState(false)
@@ -389,12 +390,12 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setFormActivityId(actId)
       setFormActivityName(taskName)
       setFormLocation(existingEntry.location || savedPref?.location || compSummary?.location || '')
-      setFormAlc(existingEntry.alc_result ? existingEntry.alc_result.replace('%', '') : '0')
-      setFormHelmet(existingEntry.ppe_helmet ?? true)
-      setFormVest(existingEntry.ppe_vest ?? true)
-      setFormShirt(existingEntry.ppe_shirt ?? true)
-      setFormGloves(existingEntry.ppe_gloves ?? true)
-      setFormShoes(existingEntry.ppe_shoes ?? true)
+      setFormAlc(existingEntry.alc_result ? String(existingEntry.alc_result).replace('%', '') : '')
+      setFormHelmet(existingEntry.ppe_helmet ?? false)
+      setFormVest(existingEntry.ppe_vest ?? false)
+      setFormShirt(existingEntry.ppe_shirt ?? false)
+      setFormGloves(existingEntry.ppe_gloves ?? false)
+      setFormShoes(existingEntry.ppe_shoes ?? false)
       setFormPurpose(existingEntry.purpose || '')
       setFormNotes(existingEntry.notes || '')
     } else {
@@ -410,12 +411,12 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setFormActivityId(targetActId)
       setFormActivityName(taskName)
       setFormLocation(savedPref?.location || compSummary?.location || targetActObj?.location || '')
-      setFormAlc('0')
-      setFormHelmet(true)
-      setFormVest(true)
-      setFormShirt(true)
-      setFormGloves(true)
-      setFormShoes(true)
+      setFormAlc('')
+      setFormHelmet(false)
+      setFormVest(false)
+      setFormShirt(false)
+      setFormGloves(false)
+      setFormShoes(false)
       setFormPurpose('')
       setFormNotes('')
     }
@@ -463,11 +464,25 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
 
     try {
       if (existingEntry) {
-        const { error } = await supabase.from('checklist_entries').update(payload).eq('id', existingEntry.id)
-        if (error) throw error
+        const res = await fetch(`/api/checklist/${existingEntry.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error)
+        }
       } else {
-        const { error } = await supabase.from('checklist_entries').insert(payload)
-        if (error) throw error
+        const res = await fetch('/api/checklist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error)
+        }
       }
       toast.success(`⚡ ตรวจผ่าน: ${contractor.name}`)
       await loadData(true)
@@ -516,12 +531,26 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
 
     try {
       if (existingEntry) {
-        const { error } = await supabase.from('checklist_entries').update(payload).eq('id', existingEntry.id)
-        if (error) throw error
+        const res = await fetch(`/api/checklist/${existingEntry.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error)
+        }
         toast.success(`อัปเดต ${selectedContractor.name} เรียบร้อย`)
       } else {
-        const { error } = await supabase.from('checklist_entries').insert(payload)
-        if (error) throw error
+        const res = await fetch('/api/checklist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error)
+        }
         toast.success(`บันทึก ${selectedContractor.name} สำเร็จ`)
       }
 
@@ -593,8 +622,15 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
     })
 
     try {
-      const { error } = await supabase.from('checklist_entries').insert(inserts)
-      if (error) throw error
+      const res = await fetch('/api/checklist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(inserts),
+      })
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.error)
+      }
       toast.success(`⚡ ตรวจผ่านด่วนทั้งทีม ${inserts.length} คน เรียบร้อย!`)
       await loadData(true)
     } catch (err: any) {
@@ -932,8 +968,8 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
               currentTeamMembers.map((member, idx) => {
                 const entry = getEntryForContractor(member)
                 const isChecked = !!entry
-                const isAlcPass = isChecked ? isAlcoholPassed(entry.alc_result) : true
-                const isPpePass = isChecked ? (entry.ppe_helmet && entry.ppe_vest && entry.ppe_shirt && entry.ppe_gloves && entry.ppe_shoes) : true
+                const isAlcPass = isChecked ? !isAlcoholFailed(entry.alc_result) : false
+                const isPpePass = isChecked ? (entry.ppe_helmet && entry.ppe_vest && entry.ppe_shirt && entry.ppe_gloves && entry.ppe_shoes) : false
                 const isSafe = isChecked && isAlcPass && isPpePass
                 const isAlcRisk = getContractorAlcRisk(member)
 
@@ -1233,14 +1269,14 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                   <span>ผลตรวจแอลกอฮอล์ (ALC)</span>
                 </div>
 
-                <span className={`text-xs font-bold px-2 py-0.5 rounded ${
-                  formAlc === 'ไม่ได้ตรวจ'
-                    ? 'bg-slate-100 text-slate-700 border border-slate-300'
+                <span className={`text-xs font-bold px-2 py-0.5 rounded border ${
+                  isAlcoholUnchecked(formAlc)
+                    ? 'bg-slate-100 text-slate-600 border-slate-300'
                     : isAlcoholPassed(formAlc)
-                    ? 'bg-emerald-100 text-emerald-950 border border-emerald-300'
-                    : 'bg-red-100 text-red-950 border border-red-300'
+                    ? 'bg-emerald-100 text-emerald-950 border-emerald-300'
+                    : 'bg-red-100 text-red-950 border-red-300'
                 }`}>
-                  {formAlc === 'ไม่ได้ตรวจ' ? 'ไม่ได้ตรวจ' : isAlcoholPassed(formAlc) ? '0 mg% (ปกติ) ✓' : `${formAlc} mg% (เกินเกณฑ์ ❌)`}
+                  {isAlcoholUnchecked(formAlc) ? 'ยังไม่ได้ตรวจ' : isAlcoholPassed(formAlc) ? `${formAlc} mg% (ปกติ) ✓` : `${formAlc} mg% (เกินเกณฑ์ ❌)`}
                 </span>
               </div>
 
@@ -1250,7 +1286,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                   type="button"
                   onClick={() => setFormAlc('0')}
                   className={`h-9 rounded-lg text-xs font-semibold transition-all border ${
-                    formAlc === '0' || formAlc === '0%' || formAlc === '0.00'
+                    formAlc === '0' || formAlc === '0.0' || formAlc === '0.00'
                       ? 'bg-emerald-600 text-white border-emerald-700 shadow-2xs'
                       : 'bg-slate-100 text-slate-800 hover:bg-slate-200 border-slate-300 font-normal'
                   }`}
@@ -1275,14 +1311,14 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                 </button>
                 <button
                   type="button"
-                  onClick={() => setFormAlc('ไม่ได้ตรวจ')}
+                  onClick={() => setFormAlc('')}
                   className={`h-9 rounded-lg text-xs font-semibold transition-all border ${
-                    formAlc === 'ไม่ได้ตรวจ'
+                    isAlcoholUnchecked(formAlc)
                       ? 'bg-slate-700 text-white border-slate-800 shadow-2xs'
                       : 'bg-slate-100 text-slate-800 hover:bg-slate-200 border-slate-300 font-normal'
                   }`}
                 >
-                  ไม่ได้ตรวจ
+                  ยังไม่ได้ตรวจ (ว่าง)
                 </button>
               </div>
 
@@ -1294,14 +1330,18 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                     inputMode="decimal"
                     step="any"
                     min="0"
-                    placeholder="ใส่ตัวเลขค่า ALC เช่น 0, 15, 25, 50"
-                    value={formAlc === 'ไม่ได้ตรวจ' ? '' : formAlc.replace('%', '').replace('>', '')}
+                    placeholder="ยังไม่ได้ตรวจ (ใส่ตัวเลข เช่น 0, 15, 25)"
+                    value={isAlcoholUnchecked(formAlc) ? '' : formAlc.replace('%', '').replace('>', '')}
                     onChange={e => {
                       const val = e.target.value
                       setFormAlc(val)
                     }}
                     className={`w-full h-9 text-xs pl-2.5 pr-12 rounded-lg border bg-white text-slate-900 font-medium focus:ring-2 focus:ring-blue-500 focus:outline-none ${
-                      isAlcoholFailed(formAlc) ? 'border-red-400 bg-red-50/50' : 'border-slate-300'
+                      isAlcoholFailed(formAlc)
+                        ? 'border-red-400 bg-red-50/50'
+                        : isAlcoholPassed(formAlc)
+                        ? 'border-emerald-400 bg-emerald-50/30'
+                        : 'border-slate-300'
                     }`}
                   />
                   <span className="absolute right-2.5 text-[11px] font-semibold text-slate-600 pointer-events-none">

@@ -10,7 +10,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import Link from 'next/link'
-import { getContractorAlcRisk, isAlcoholPassed, isAlcoholFailed } from '@/lib/types'
+import { getContractorAlcRisk, isAlcoholPassed, isAlcoholFailed, isAlcoholUnchecked } from '@/lib/types'
 
 /* ── PPE Compact Dots with Labels ── */
 const PPECompact = ({ entry }: { entry: ChecklistEntry }) => {
@@ -212,12 +212,14 @@ export function ChecklistTable({ entries, loading, onDelete, showDate = false }:
                   <td className="py-1.5 px-1.5 text-center border-r border-slate-200">
                     <span
                       className={`px-1.5 py-0.5 rounded text-xs font-normal border ${
-                        isAlcFail
-                          ? 'bg-red-100 text-red-900 border-red-400'
-                          : 'bg-emerald-100 text-emerald-900 border-emerald-400'
+                        isAlcoholUnchecked(e.alc_result)
+                          ? 'bg-slate-100 text-slate-600 border-slate-300'
+                          : isAlcFail
+                          ? 'bg-red-100 text-red-900 border-red-400 font-semibold'
+                          : 'bg-emerald-100 text-emerald-900 border-emerald-400 font-semibold'
                       }`}
                     >
-                      {e.alc_result}
+                      {isAlcoholUnchecked(e.alc_result) ? 'ยังไม่ตรวจ' : e.alc_result}
                     </span>
                   </td>
 

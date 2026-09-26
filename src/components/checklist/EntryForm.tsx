@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import type { ChecklistEntryFormData, Contractor, Activity } from '@/lib/types'
-import { isAlcoholFailed } from '@/lib/types'
+import { isAlcoholFailed, isAlcoholPassed, isAlcoholUnchecked, normalizeAlcForDb } from '@/lib/types'
 import { format } from 'date-fns'
 
 import { Button } from '@/components/ui/button'
@@ -42,7 +42,7 @@ const defaultFormData: ChecklistEntryFormData = {
   card_name: '',
   activity_name: '',
   location: '',
-  alc_result: '0%',
+  alc_result: '',
   ppe_helmet: false,
   ppe_vest: false,
   ppe_shirt: false,
@@ -171,21 +171,30 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
     }
     setLoading(true)
 
-    const payload = { ...formData, entry_date: entryDate }
-
-    let error
-    if (entryId) {
-      ;({ error } = await supabase.from('checklist_entries').update(payload).eq('id', entryId))
-    } else {
-      ;({ error } = await supabase.from('checklist_entries').insert(payload))
+    const payload = {
+      ...formData,
+      entry_date: entryDate,
+      alc_result: normalizeAlcForDb(formData.alc_result),
     }
 
-    if (error) {
-      toast.error('บันทึกไม่สำเร็จ', { description: error.message })
-    } else {
+    try {
+      const url = entryId ? `/api/checklist/${entryId}` : '/api/checklist'
+      const method = entryId ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'บันทึกไม่สำเร็จ')
+      }
       toast.success(entryId ? 'แก้ไขสำเร็จ' : 'เพิ่มรายการสำเร็จ')
       router.push('/checklist')
       router.refresh()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'
+      toast.error('บันทึกไม่สำเร็จ', { description: message })
     }
     setLoading(false)
   }
@@ -441,31 +450,50 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
             </CardHeader>
             <CardContent className="p-5">
               <div className="grid grid-cols-3 gap-2 mb-3">
-                {(['0%', '>0%', 'ไม่ได้ตรวจ'] as const).map(v => (
-                  <button
-                    key={v}
-                    type="button"
-                    onClick={() => setFormData(prev => ({ ...prev, alc_result: v }))}
-                    className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${
-                      formData.alc_result === v
-                        ? v === '>0%'
-                          ? 'bg-rose-600 text-white border-rose-600 shadow-sm ring-2 ring-rose-200'
-                          : v === '0%'
-                          ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm ring-2 ring-emerald-200'
-                          : 'bg-slate-700 text-white border-slate-700 shadow-sm ring-2 ring-slate-200'
-                        : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white hover:border-slate-300'
-                    }`}
-                  >
-                    {v}
-                  </button>
-                ))}
+                <button
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, alc_result: '0' }))}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${
+                    isAlcoholPassed(formData.alc_result)
+                      ? 'bg-emerald-600 text-white border-emerald-600 shadow-sm ring-2 ring-emerald-200'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white hover:border-slate-300'
+                  }`}
+                >
+                  0 (ปกติ)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, alc_result: isAlcoholFailed(formData.alc_result) ? formData.alc_result : '25' }))}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${
+                    isAlcoholFailed(formData.alc_result)
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-sm ring-2 ring-rose-200'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white hover:border-slate-300'
+                  }`}
+                >
+                  ระบุค่าเกิน (&gt;0)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFormData(prev => ({ ...prev, alc_result: '' }))}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold border transition-all ${
+                    isAlcoholUnchecked(formData.alc_result)
+                      ? 'bg-slate-700 text-white border-slate-700 shadow-sm ring-2 ring-slate-200'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-white hover:border-slate-300'
+                  }`}
+                >
+                  ยังไม่ได้ตรวจ (ว่าง)
+                </button>
               </div>
               <div className="space-y-1">
-                <Label htmlFor="custom-alc" className="text-xs text-slate-600 font-normal">หรือพิมพ์ระบุค่า ALC โดยตรง:</Label>
+                <Label htmlFor="custom-alc" className="text-xs text-slate-600 font-normal">หรือพิมพ์ระบุตัวเลข ALC โดยตรง:</Label>
                 <Input
                   id="custom-alc"
-                  placeholder="เช่น 0.02%, 0"
-                  value={formData.alc_result}
+                  type="number"
+                  inputMode="decimal"
+                  step="any"
+                  min="0"
+                  placeholder="ยังไม่ได้ตรวจ (ใส่ตัวเลข เช่น 0, 15, 25)"
+                  value={isAlcoholUnchecked(formData.alc_result) ? '' : (formData.alc_result ?? '')}
                   onChange={e => setFormData(prev => ({ ...prev, alc_result: e.target.value }))}
                   className="font-mono text-xs"
                 />

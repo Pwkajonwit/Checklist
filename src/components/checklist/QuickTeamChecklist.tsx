@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { ChecklistEntry, Contractor, Company, Activity, ALCResult } from '@/lib/types'
-import { getContractorAlcRisk, getContractorDailyWage, isAlcoholPassed, isAlcoholFailed } from '@/lib/types'
+import { getContractorAlcRisk, getContractorDailyWage, isAlcoholPassed, isAlcoholFailed, isAlcoholUnchecked, normalizeAlcForDb } from '@/lib/types'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import {
@@ -216,12 +216,12 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
         }
       } else {
         newStates[c.id] = newStates[c.id] || {
-          alc_result: '0%',
-          ppe_helmet: true,
-          ppe_vest: true,
-          ppe_shirt: true,
-          ppe_gloves: true,
-          ppe_shoes: true,
+          alc_result: '',
+          ppe_helmet: false,
+          ppe_vest: false,
+          ppe_shirt: false,
+          ppe_gloves: false,
+          ppe_shoes: false,
           activity_id: defaultActivityId || undefined,
           activity_name: defaultActivityName || undefined,
           location: defaultLocation || undefined,
@@ -302,12 +302,12 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
   const getRowState = (contractorId: string): RowChecklistState => {
     return (
       rowStates[contractorId] || {
-        alc_result: '0%',
-        ppe_helmet: true,
-        ppe_vest: true,
-        ppe_shirt: true,
-        ppe_gloves: true,
-        ppe_shoes: true,
+        alc_result: '',
+        ppe_helmet: false,
+        ppe_vest: false,
+        ppe_shirt: false,
+        ppe_gloves: false,
+        ppe_shoes: false,
         activity_id: defaultActivityId || undefined,
         activity_name: defaultActivityName || undefined,
         location: defaultLocation || undefined,
@@ -318,12 +318,12 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
   const updateRow = (contractorId: string, updates: Partial<RowChecklistState>) => {
     setRowStates(prev => {
       const cur = prev[contractorId] || {
-        alc_result: '0%',
-        ppe_helmet: true,
-        ppe_vest: true,
-        ppe_shirt: true,
-        ppe_gloves: true,
-        ppe_shoes: true,
+        alc_result: '',
+        ppe_helmet: false,
+        ppe_vest: false,
+        ppe_shirt: false,
+        ppe_gloves: false,
+        ppe_shoes: false,
       }
       return {
         ...prev,
@@ -340,7 +340,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
     const targetState = !isAllPass
 
     updateRow(contractorId, {
-      alc_result: '0%',
+      alc_result: targetState ? '0' : '',
       ppe_helmet: targetState,
       ppe_vest: targetState,
       ppe_shirt: targetState,
@@ -360,12 +360,12 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       const updated = { ...prev }
       currentTeamMembers.forEach(c => {
         const cur = updated[c.id] || {
-          alc_result: '0%',
-          ppe_helmet: true,
-          ppe_vest: true,
-          ppe_shirt: true,
-          ppe_gloves: true,
-          ppe_shoes: true,
+          alc_result: '',
+          ppe_helmet: false,
+          ppe_vest: false,
+          ppe_shirt: false,
+          ppe_gloves: false,
+          ppe_shoes: false,
         }
         updated[c.id] = { ...cur, [key]: nextVal }
       })
@@ -375,18 +375,18 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
 
   const bulkToggleALC = () => {
     const all0 = currentTeamMembers.every(c => isAlcoholPassed(getRowState(c.id).alc_result))
-    const nextVal: ALCResult = all0 ? '>0%' : '0%'
+    const nextVal: ALCResult = all0 ? '' : '0'
 
     setRowStates(prev => {
       const updated = { ...prev }
       currentTeamMembers.forEach(c => {
         const cur = updated[c.id] || {
-          alc_result: '0%',
-          ppe_helmet: true,
-          ppe_vest: true,
-          ppe_shirt: true,
-          ppe_gloves: true,
-          ppe_shoes: true,
+          alc_result: '',
+          ppe_helmet: false,
+          ppe_vest: false,
+          ppe_shirt: false,
+          ppe_gloves: false,
+          ppe_shoes: false,
         }
         updated[c.id] = { ...cur, alc_result: nextVal }
       })
@@ -443,7 +443,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       location: (st.location || defaultLocation || '').trim() || null,
       check_in_time: (defaultCheckIn || '').trim() || null,
       check_out_time: (defaultCheckOut || '').trim() || null,
-      alc_result: (st.alc_result || '').trim() || '0%',
+      alc_result: normalizeAlcForDb(st.alc_result),
       ppe_helmet: !!st.ppe_helmet,
       ppe_vest: !!st.ppe_vest,
       ppe_shirt: !!st.ppe_shirt,
@@ -458,15 +458,26 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
 
     try {
       if (existingEntry) {
-        const { error } = await supabase
-          .from('checklist_entries')
-          .update(payload)
-          .eq('id', existingEntry.id)
-        if (error) throw error
+        const res = await fetch(`/api/checklist/${existingEntry.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error)
+        }
         toast.success(`อัปเดต ${contractor.name} สำเร็จ`)
       } else {
-        const { error } = await supabase.from('checklist_entries').insert(payload)
-        if (error) throw error
+        const res = await fetch('/api/checklist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error)
+        }
         toast.success(`บันทึก ${contractor.name} สำเร็จ`)
       }
       onRefreshEntries()
@@ -507,7 +518,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           location: (st.location || defaultLocation || '').trim() || null,
           check_in_time: (defaultCheckIn || '').trim() || null,
           check_out_time: (defaultCheckOut || '').trim() || null,
-          alc_result: (st.alc_result || '').trim() || '0%',
+          alc_result: normalizeAlcForDb(st.alc_result),
           ppe_helmet: !!st.ppe_helmet,
           ppe_vest: !!st.ppe_vest,
           ppe_shirt: !!st.ppe_shirt,
@@ -528,13 +539,27 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       })
 
       if (inserts.length > 0) {
-        const { error: insErr } = await supabase.from('checklist_entries').insert(inserts)
-        if (insErr) throw insErr
+        const res = await fetch('/api/checklist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(inserts),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error)
+        }
       }
 
       for (const u of updates) {
-        const { error: upErr } = await supabase.from('checklist_entries').update(u.payload).eq('id', u.id)
-        if (upErr) throw upErr
+        const res = await fetch(`/api/checklist/${u.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(u.payload),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error)
+        }
       }
 
       toast.success(`บันทึก Checklist ${currentTeamMembers.length} คนเรียบร้อยแล้ว`)
@@ -657,7 +682,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       location: (updatedRowState.location || defaultLocation || '').trim() || null,
       check_in_time: (defaultCheckIn || '').trim() || null,
       check_out_time: (defaultCheckOut || '').trim() || null,
-      alc_result: '0%' as ALCResult,
+      alc_result: '0' as ALCResult,
       ppe_helmet: true,
       ppe_vest: true,
       ppe_shirt: true,
@@ -672,14 +697,25 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
 
     try {
       if (existingEntry) {
-        const { error } = await supabase
-          .from('checklist_entries')
-          .update(payload)
-          .eq('id', existingEntry.id)
-        if (error) throw error
+        const res = await fetch(`/api/checklist/${existingEntry.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error)
+        }
       } else {
-        const { error } = await supabase.from('checklist_entries').insert(payload)
-        if (error) throw error
+        const res = await fetch('/api/checklist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error)
+        }
       }
       toast.success(`⚡ ตรวจผ่าน: ${contractor.name}`)
       onRefreshEntries()
@@ -722,7 +758,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           location: (row.location || defaultLocation || '').trim() || null,
           check_in_time: (defaultCheckIn || '').trim() || null,
           check_out_time: (defaultCheckOut || '').trim() || null,
-          alc_result: '0%' as ALCResult,
+          alc_result: '0' as ALCResult,
           ppe_helmet: true,
           ppe_vest: true,
           ppe_shirt: true,
@@ -736,8 +772,15 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
         }
       })
 
-      const { error } = await supabase.from('checklist_entries').insert(inserts)
-      if (error) throw error
+      const res = await fetch('/api/checklist', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(inserts),
+      })
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.error)
+      }
       toast.success(`⚡ ตรวจผ่านด่วนทั้งหมด ${inserts.length} คน เรียบร้อย!`)
       onRefreshEntries()
     } catch (err: any) {
@@ -1130,44 +1173,64 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                           <div className="text-xs font-semibold text-slate-600 mb-1.5 flex items-center justify-between">
                             <span>ผลตรวจแอลกอฮอล์</span>
                             <span className={`text-xs font-mono px-2 py-0.5 rounded border ${
-                              isAlcoholPassed(st.alc_result)
-                                ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
-                                : st.alc_result === 'ไม่ได้ตรวจ'
+                              isAlcoholUnchecked(st.alc_result)
                                 ? 'bg-slate-100 text-slate-700 border-slate-300'
+                                : isAlcoholPassed(st.alc_result)
+                                ? 'bg-emerald-50 text-emerald-900 border-emerald-300'
                                 : 'bg-red-50 text-red-900 border-red-300 font-semibold'
                             }`}>
-                              {st.alc_result || '0%'} {isAlcoholPassed(st.alc_result) ? '(ปกติ)' : '(เกินเกณฑ์)'}
+                              {isAlcoholUnchecked(st.alc_result)
+                                ? 'ยังไม่ได้ตรวจ'
+                                : isAlcoholPassed(st.alc_result)
+                                ? `${st.alc_result} (ปกติ) ✓`
+                                : `${st.alc_result} (เกินเกณฑ์ ❌)`}
                             </span>
                           </div>
-                          <div className="grid grid-cols-2 gap-2 mb-2">
+                          <div className="grid grid-cols-3 gap-1.5 mb-2">
                             <button
                               type="button"
-                              onClick={() => updateRow(member.id, { alc_result: '0%' })}
-                              className={`py-2 px-3 rounded-lg text-xs font-normal border flex items-center justify-center gap-1.5 transition-all ${isAlcoholPassed(st.alc_result) && (st.alc_result === '0%' || !st.alc_result)
-                                ? 'bg-emerald-600 text-white font-semibold border-emerald-700 shadow-2xs'
-                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                                }`}
+                              onClick={() => updateRow(member.id, { alc_result: '0' })}
+                              className={`py-1.5 px-2 rounded-lg text-xs font-normal border flex items-center justify-center gap-1 transition-all ${
+                                isAlcoholPassed(st.alc_result)
+                                  ? 'bg-emerald-600 text-white font-semibold border-emerald-700 shadow-2xs'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                              }`}
                             >
-                              <Check className="w-4 h-4" />
-                              <span>0% ผ่านเกณฑ์</span>
+                              <Check className="w-3.5 h-3.5" />
+                              <span>0 ปกติ</span>
                             </button>
                             <button
                               type="button"
-                              onClick={() => updateRow(member.id, { alc_result: st.alc_result && isAlcoholFailed(st.alc_result) ? st.alc_result : '>0%' })}
-                              className={`py-2 px-3 rounded-lg text-xs font-normal border flex items-center justify-center gap-1.5 transition-all ${isAlcoholFailed(st.alc_result)
-                                ? 'bg-red-600 text-white font-semibold border-red-700 shadow-2xs animate-pulse'
-                                : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
-                                }`}
+                              onClick={() => updateRow(member.id, { alc_result: isAlcoholFailed(st.alc_result) ? st.alc_result : '25' })}
+                              className={`py-1.5 px-2 rounded-lg text-xs font-normal border flex items-center justify-center gap-1 transition-all ${
+                                isAlcoholFailed(st.alc_result)
+                                  ? 'bg-red-600 text-white font-semibold border-red-700 shadow-2xs animate-pulse'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                              }`}
                             >
-                              <AlertTriangle className="w-4 h-4" />
-                              <span>&gt;0% มีแอลกอฮอล์</span>
+                              <AlertTriangle className="w-3.5 h-3.5" />
+                              <span>&gt;0 เกิน</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => updateRow(member.id, { alc_result: '' })}
+                              className={`py-1.5 px-2 rounded-lg text-xs font-normal border flex items-center justify-center gap-1 transition-all ${
+                                isAlcoholUnchecked(st.alc_result)
+                                  ? 'bg-slate-700 text-white font-semibold border-slate-800 shadow-2xs'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-50'
+                              }`}
+                            >
+                              <span>ยังไม่ตรวจ</span>
                             </button>
                           </div>
                           <div className="relative flex items-center">
                             <input
-                              type="text"
-                              placeholder="หรือพิมพ์ระบุค่า ALC เอง เช่น 0.02% หรือ 0"
-                              value={st.alc_result || ''}
+                              type="number"
+                              inputMode="decimal"
+                              step="any"
+                              min="0"
+                              placeholder="ยังไม่ได้ตรวจ (ใส่ตัวเลข เช่น 0, 15, 25)"
+                              value={isAlcoholUnchecked(st.alc_result) ? '' : (st.alc_result ?? '')}
                               onChange={e => updateRow(member.id, { alc_result: e.target.value })}
                               className="w-full text-xs font-normal px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white placeholder:text-slate-400 font-mono"
                             />
@@ -1877,31 +1940,28 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                               <input
                                 type="text"
                                 list={`alc-list-${member.id}`}
-                                value={st.alc_result ?? '0%'}
+                                value={isAlcoholUnchecked(st.alc_result) ? '' : (st.alc_result ?? '')}
                                 onChange={e => updateRow(member.id, { alc_result: e.target.value })}
-                                placeholder="0%"
+                                placeholder="ยังไม่ตรวจ"
                                 className={`w-full text-xs text-center py-1 pl-1 pr-4 rounded border font-mono transition-colors focus:outline-none focus:ring-1 focus:ring-blue-500 ${
-                                  isAlcoholPassed(st.alc_result)
-                                    ? 'bg-emerald-50 text-emerald-900 border-emerald-400'
-                                    : st.alc_result === 'ไม่ได้ตรวจ'
-                                    ? 'bg-slate-100 text-slate-700 border-slate-300'
+                                  isAlcoholUnchecked(st.alc_result)
+                                    ? 'bg-white text-slate-700 border-slate-300 placeholder:text-slate-400'
+                                    : isAlcoholPassed(st.alc_result)
+                                    ? 'bg-emerald-50 text-emerald-900 border-emerald-400 font-semibold'
                                     : 'bg-red-100 text-red-900 border-red-500 font-semibold animate-pulse'
                                 }`}
                               />
                               <datalist id={`alc-list-${member.id}`}>
                                 <option value="0" />
-                                <option value="0.00" />
+                                <option value="15" />
                                 <option value="25" />
                                 <option value="50" />
-                                <option value="ไม่ได้ตรวจ" />
                               </datalist>
                               <select
                                 aria-label="เลือกค่า ALC"
                                 value=""
                                 onChange={e => {
-                                  if (e.target.value) {
-                                    updateRow(member.id, { alc_result: e.target.value })
-                                  }
+                                  updateRow(member.id, { alc_result: e.target.value })
                                 }}
                                 className="absolute right-0 top-0 bottom-0 w-4 opacity-0 cursor-pointer"
                                 title="คลิกเพื่อเลือกค่า ALC ด่วน"
@@ -1910,7 +1970,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                                 <option value="0">0 (ปกติ)</option>
                                 <option value="25">25 (เกินเกณฑ์)</option>
                                 <option value="50">50 (เกินเกณฑ์)</option>
-                                <option value="ไม่ได้ตรวจ">ไม่ได้ตรวจ</option>
+                                <option value="">ยังไม่ได้ตรวจ (ว่าง)</option>
                               </select>
                               <ChevronDown className="w-2.5 h-2.5 text-slate-500 absolute right-1 pointer-events-none" />
                             </div>

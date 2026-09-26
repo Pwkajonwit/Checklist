@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { ChecklistEntry } from '@/lib/types'
+import { isAlcoholFailed } from '@/lib/types'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 
@@ -48,9 +49,14 @@ export default function ChecklistPage() {
   }, [fetchEntries])
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from('checklist_entries').delete().eq('id', id)
-    if (error) toast.error('ลบไม่สำเร็จ')
-    else { toast.success('ลบรายการแล้ว'); fetchEntries() }
+    try {
+      const res = await fetch(`/api/checklist/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error('ลบไม่สำเร็จ')
+      toast.success('ลบรายการแล้ว')
+      fetchEntries()
+    } catch {
+      toast.error('ลบไม่สำเร็จ')
+    }
   }
 
   const shiftDate = (d: -1 | 1) => {
@@ -62,7 +68,7 @@ export default function ChecklistPage() {
 
   const stats = {
     total: entries.length,
-    fail: entries.filter(e => e.alc_result === '>0%').length,
+    fail: entries.filter(e => isAlcoholFailed(e.alc_result)).length,
   }
 
   return (

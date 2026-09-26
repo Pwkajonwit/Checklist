@@ -8,7 +8,7 @@ import {
   HardHat, CheckCircle2, XCircle, AlertTriangle, Shield,
 } from 'lucide-react'
 import Link from 'next/link'
-import { getContractorAlcRisk, isAlcoholFailed } from '@/lib/types'
+import { getContractorAlcRisk, isAlcoholFailed, isAlcoholUnchecked } from '@/lib/types'
 
 /* ── PPE compact ── */
 const PPEStrip = ({ entry }: { entry: ChecklistEntry }) => {
@@ -181,12 +181,24 @@ export function ChecklistCards({ entries, loading, onDelete }: ChecklistCardsPro
                 borderBottom: '1px solid hsl(var(--c-border))',
                 flexWrap: 'wrap',
               }}>
-                <span className={`badge ${isAlcoholFailed(e.alc_result) ? 'badge-alc-fail' : 'badge-alc-ok'}`}
+                <span className={`badge ${
+                  isAlcoholUnchecked(e.alc_result)
+                    ? 'badge-muted'
+                    : isAlcoholFailed(e.alc_result)
+                    ? 'badge-alc-fail'
+                    : 'badge-alc-ok'
+                }`}
                   style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 12, fontWeight: 400 }}>
-                  {isAlcoholFailed(e.alc_result)
-                    ? <AlertTriangle className="w-3.5 h-3.5" />
-                    : <CheckCircle2 className="w-3.5 h-3.5" />}
-                  ALC {e.alc_result}
+                  {isAlcoholUnchecked(e.alc_result) ? (
+                    'ALC ยังไม่ตรวจ'
+                  ) : (
+                    <>
+                      {isAlcoholFailed(e.alc_result)
+                        ? <AlertTriangle className="w-3.5 h-3.5" />
+                        : <CheckCircle2 className="w-3.5 h-3.5" />}
+                      ALC {e.alc_result}
+                    </>
+                  )}
                 </span>
                 <PPEStrip entry={e} />
                 {e.noise_area && (

@@ -33,14 +33,21 @@ export default function CompaniesPage() {
 
   const fetchData = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase.from('companies').select('*').order('name')
-    if (error) {
-      toast.error('โหลดข้อมูลบริษัทไม่สำเร็จ')
-    } else {
+    try {
+      const res = await fetch('/api/companies')
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'โหลดข้อมูลบริษัทไม่สำเร็จ')
+      }
+      const { data } = await res.json()
       setCompanies(data ?? [])
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'โหลดข้อมูลบริษัทไม่สำเร็จ'
+      toast.error(message)
+    } finally {
+      setLoading(false)
     }
-    setLoading(false)
-  }, [supabase])
+  }, [])
 
   useEffect(() => {
     fetchData()
@@ -81,31 +88,42 @@ export default function CompaniesPage() {
       code: formCode.trim() ? formCode.trim().toUpperCase() : null
     }
 
-    let error
-    if (editId) {
-      ;({ error } = await supabase.from('companies').update(payload).eq('id', editId))
-    } else {
-      ;({ error } = await supabase.from('companies').insert(payload))
-    }
-
-    if (error) {
-      toast.error('บันทึกไม่สำเร็จ', { description: error.message })
-    } else {
+    try {
+      const url = editId ? `/api/companies/${editId}` : '/api/companies'
+      const method = editId ? 'PUT' : 'POST'
+      const res = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'บันทึกไม่สำเร็จ')
+      }
       toast.success(editId ? 'แก้ไขข้อมูลบริษัทแล้ว' : 'เพิ่มบริษัทเรียบร้อยแล้ว')
       setDialogOpen(false)
       fetchData()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'บันทึกไม่สำเร็จ'
+      toast.error('บันทึกไม่สำเร็จ', { description: message })
+    } finally {
+      setSaving(false)
     }
-    setSaving(false)
   }
 
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`ต้องการลบบริษัท "${name}" ใช่หรือไม่?`)) return
-    const { error } = await supabase.from('companies').delete().eq('id', id)
-    if (error) {
-      toast.error('ลบไม่สำเร็จ (อาจมีผู้รับเหมาผูกอยู่)')
-    } else {
+    try {
+      const res = await fetch(`/api/companies/${id}`, { method: 'DELETE' })
+      if (!res.ok) {
+        const err = await res.json()
+        throw new Error(err.error || 'ลบไม่สำเร็จ (อาจมีผู้รับเหมาผูกอยู่)')
+      }
       toast.success(`ลบ ${name} แล้ว`)
       fetchData()
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'ลบไม่สำเร็จ'
+      toast.error('ลบไม่สำเร็จ', { description: message })
     }
   }
 
