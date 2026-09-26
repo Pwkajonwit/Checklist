@@ -112,7 +112,7 @@ export function AppSidebar({ role, initials = '?', email = '', name = '' }: AppS
   const supabase = createClient()
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await fetch('/api/auth/logout', { method: 'POST' })
     toast.success('ออกจากระบบแล้ว')
     router.push('/login')
     router.refresh()

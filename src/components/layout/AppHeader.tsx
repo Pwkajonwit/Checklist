@@ -109,7 +109,7 @@ export function AppHeader({ role, initials = '?', email = '', name = '' }: AppHe
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
   const handleLogout = async () => {
-    await supabase.auth.signOut()
+    await fetch('/api/auth/logout', { method: 'POST' })
     toast.success('ออกจากระบบแล้ว')
     router.push('/login')
     router.refresh()

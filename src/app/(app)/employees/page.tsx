@@ -1,9 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import type { UserProfile, UserRole } from '@/lib/types'
+import type { UserRole } from '@/lib/types'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,8 +14,23 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Shield, ShieldCheck, Eye, Search, Plus, Pencil, Trash2,
-  RefreshCw, Loader2, Phone, ChevronDown, CheckCircle2, XCircle, UserCog
+  RefreshCw, Loader2, Phone, CheckCircle2, XCircle, UserCog, Link2
 } from 'lucide-react'
+
+interface UserProfileFull {
+  id: string
+  email: string | null
+  full_name: string | null
+  role: UserRole
+  phone: string | null
+  department: string | null
+  is_active: boolean
+  line_user_id: string | null
+  line_display_name: string | null
+  line_picture_url: string | null
+  created_at: string
+  updated_at: string
+}
 
 interface UserFormData {
   full_name: string
@@ -64,9 +78,7 @@ const ROLE_CONFIG: Record<UserRole, { label: string; desc: string; icon: React.E
 }
 
 export default function EmployeesPage() {
-  const supabase = useMemo(() => createClient(), [])
-
-  const [users, setUsers] = useState<UserProfile[]>([])
+  const [users, setUsers] = useState<UserProfileFull[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [search, setSearch] = useState('')
@@ -78,19 +90,16 @@ export default function EmployeesPage() {
   const [editId, setEditId] = useState<string | null>(null)
   const [formData, setFormData] = useState<UserFormData>(defaultForm)
 
-  // Fetch Users
+  // Fetch Users from API route (uses service role)
   const fetchData = useCallback(async (isManual = false) => {
     if (isManual) setRefreshing(true)
     else setLoading(true)
 
     try {
-      const { data, error } = await supabase
-        .from('user_profiles')
-        .select('*')
-        .order('created_at', { ascending: false })
-
-      if (error) throw error
-      setUsers((data as UserProfile[]) ?? [])
+      const res = await fetch('/api/admin/users')
+      if (!res.ok) throw new Error((await res.json()).error ?? 'โหลดไม่สำเร็จ')
+      const { data } = await res.json()
+      setUsers((data as UserProfileFull[]) ?? [])
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'ไม่สามารถโหลดข้อมูลผู้ใช้งานได้'
       toast.error('เกิดข้อผิดพลาดในการโหลดข้อมูล', { description: message })
@@ -98,7 +107,7 @@ export default function EmployeesPage() {
       setLoading(false)
       setRefreshing(false)
     }
-  }, [supabase])
+  }, [])
 
   useEffect(() => {
     fetchData()
@@ -114,7 +123,8 @@ export default function EmployeesPage() {
         const emailMatch = (u.email ?? '').toLowerCase().includes(q)
         const deptMatch = (u.department ?? '').toLowerCase().includes(q)
         const phoneMatch = (u.phone ?? '').toLowerCase().includes(q)
-        if (!nameMatch && !emailMatch && !deptMatch && !phoneMatch) return false
+        const lineMatch = (u.line_display_name ?? '').toLowerCase().includes(q)
+        if (!nameMatch && !emailMatch && !deptMatch && !phoneMatch && !lineMatch) return false
       }
       return true
     })
@@ -127,7 +137,8 @@ export default function EmployeesPage() {
     const supervisors = users.filter(u => u.role === 'supervisor').length
     const viewers = users.filter(u => u.role === 'viewer').length
     const active = users.filter(u => u.is_active !== false).length
-    return { total, admins, supervisors, viewers, active }
+    const lineLinked = users.filter(u => u.line_user_id).length
+    return { total, admins, supervisors, viewers, active, lineLinked }
   }, [users])
 
   // Open Create Dialog
@@ -138,7 +149,7 @@ export default function EmployeesPage() {
   }
 
   // Open Edit Dialog
-  const openEdit = (u: UserProfile) => {
+  const openEdit = (u: UserProfileFull) => {
     setEditId(u.id)
     setFormData({
       full_name: u.full_name ?? '',
@@ -151,39 +162,47 @@ export default function EmployeesPage() {
     setDialogOpen(true)
   }
 
-  // Save (Create or Update)
+  // Save (Create or Update) via API
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!formData.full_name.trim()) {
       toast.error('กรุณาระบุชื่อ-นามสกุล')
       return
     }
-    if (!formData.email.trim()) {
-      toast.error('กรุณาระบุอีเมลผู้ใช้งาน')
+    if (!formData.phone.trim()) {
+      toast.error('กรุณาระบุเบอร์โทรศัพท์ (ใช้สำหรับ Login)')
       return
     }
 
     setSaving(true)
     const payload = {
       full_name: formData.full_name.trim(),
-      email: formData.email.trim().toLowerCase(),
+      email: formData.email.trim().toLowerCase() || null,
       role: formData.role,
       department: formData.department.trim() || null,
       phone: formData.phone.trim() || null,
       is_active: formData.is_active,
-      updated_at: new Date().toISOString(),
     }
 
     try {
+      let res: Response
       if (editId) {
-        const { error } = await supabase.from('user_profiles').update(payload).eq('id', editId)
-        if (error) throw error
-        toast.success('แก้ไขข้อมูลผู้ใช้งานสำเร็จ')
+        res = await fetch(`/api/admin/users/${editId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
       } else {
-        const { error } = await supabase.from('user_profiles').insert(payload)
-        if (error) throw error
-        toast.success('เพิ่มผู้ใช้งานระบบใหม่สำเร็จ')
+        res = await fetch('/api/admin/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
       }
+
+      if (!res.ok) throw new Error((await res.json()).error ?? 'บันทึกไม่สำเร็จ')
+
+      toast.success(editId ? 'แก้ไขข้อมูลผู้ใช้งานสำเร็จ' : 'เพิ่มผู้ใช้งานระบบใหม่สำเร็จ')
       setDialogOpen(false)
       fetchData(true)
     } catch (err: unknown) {
@@ -199,8 +218,8 @@ export default function EmployeesPage() {
     if (!confirm(`ต้องการลบผู้ใช้งาน "${name}" ออกจากระบบหรือไม่?\nการดำเนินการนี้ไม่สามารถยกเลิกได้`)) return
 
     try {
-      const { error } = await supabase.from('user_profiles').delete().eq('id', id)
-      if (error) throw error
+      const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error((await res.json()).error ?? 'ลบไม่สำเร็จ')
       toast.success(`ลบ "${name}" เรียบร้อยแล้ว`)
       fetchData(true)
     } catch (err: unknown) {
@@ -210,15 +229,15 @@ export default function EmployeesPage() {
   }
 
   // Toggle Active
-  const handleToggleActive = async (u: UserProfile) => {
-    const nextStatus = u.is_active === false ? true : false
+  const handleToggleActive = async (u: UserProfileFull) => {
+    const nextStatus = !u.is_active
     try {
-      const { error } = await supabase
-        .from('user_profiles')
-        .update({ is_active: nextStatus, updated_at: new Date().toISOString() })
-        .eq('id', u.id)
-
-      if (error) throw error
+      const res = await fetch(`/api/admin/users/${u.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ is_active: nextStatus }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error ?? 'เปลี่ยนสถานะไม่สำเร็จ')
       toast.success(nextStatus ? `เปิดใช้งาน "${u.full_name}" แล้ว` : `ปิดใช้งาน "${u.full_name}" แล้ว`)
       setUsers(prev => prev.map(item => (item.id === u.id ? { ...item, is_active: nextStatus } : item)))
     } catch (err: unknown) {
@@ -237,6 +256,12 @@ export default function EmployeesPage() {
           <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-blue-50 text-blue-800 text-xs font-bold border border-blue-200">
             <UserCog className="w-3.5 h-3.5 text-blue-600" />
             <span>จัดการพนักงาน (ผู้ใช้งาน)</span>
+          </div>
+
+          {/* LINE linked badge */}
+          <div className="flex items-center gap-1 px-2 py-1 rounded bg-green-50 text-green-700 text-[11px] font-semibold border border-green-200">
+            <Link2 className="w-3 h-3" />
+            LINE ผูกแล้ว {stats.lineLinked}/{stats.total}
           </div>
 
           {/* Quick role tabs */}
@@ -294,7 +319,7 @@ export default function EmployeesPage() {
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input
               type="search"
-              placeholder="ค้นหาชื่อ, อีเมล, แผนก..."
+              placeholder="ค้นหาชื่อ, เบอร์, แผนก, LINE..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full text-xs pl-8 pr-2.5 py-1 rounded border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -323,7 +348,7 @@ export default function EmployeesPage() {
         </div>
       </div>
 
-      {/* ── Table Container (Spreadsheet Grid) ── */}
+      {/* ── Table Container ── */}
       <div className="border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs flex-1 min-h-0 flex flex-col h-full">
         {loading ? (
           <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-400">
@@ -352,13 +377,13 @@ export default function EmployeesPage() {
             <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 bg-slate-100 z-10 select-none">
                 <tr className="text-[11px] font-bold text-slate-700 border-b border-slate-300">
-                  <th className="py-2 px-2.5 text-center w-12 border-r border-slate-300">#</th>
+                  <th className="py-2 px-2.5 text-center w-10 border-r border-slate-300">#</th>
                   <th className="py-2 px-3 border-r border-slate-300">ชื่อ - นามสกุล</th>
-                  <th className="py-2 px-3 border-r border-slate-300">อีเมล (Login)</th>
+                  <th className="py-2 px-3 border-r border-slate-300">เบอร์โทร (Login)</th>
                   <th className="py-2 px-3 border-r border-slate-300">บทบาท / สิทธิ์</th>
                   <th className="py-2 px-3 border-r border-slate-300">แผนก / สังกัด</th>
-                  <th className="py-2 px-3 border-r border-slate-300">เบอร์ติดต่อ</th>
-                  <th className="py-2 px-2.5 text-center w-24 border-r border-slate-300">สถานะ</th>
+                  <th className="py-2 px-3 border-r border-slate-300 text-center w-28">LINE</th>
+                  <th className="py-2 px-2.5 text-center w-20 border-r border-slate-300">สถานะ</th>
                   <th className="py-2 px-2.5 text-center w-20">จัดการ</th>
                 </tr>
               </thead>
@@ -367,6 +392,7 @@ export default function EmployeesPage() {
                   const roleCfg = ROLE_CONFIG[u.role] || ROLE_CONFIG.viewer
                   const RoleIcon = roleCfg.icon
                   const isActive = u.is_active !== false
+                  const hasLine = !!u.line_user_id
 
                   return (
                     <tr
@@ -400,9 +426,19 @@ export default function EmployeesPage() {
                         </div>
                       </td>
 
-                      {/* Email */}
-                      <td className="py-1.5 px-3 border-r border-slate-200 font-mono text-[11px] text-slate-600">
-                        {u.email}
+                      {/* Phone */}
+                      <td className="py-1.5 px-3 border-r border-slate-200 font-mono text-[11px]">
+                        {u.phone ? (
+                          <a
+                            href={`tel:${u.phone}`}
+                            className="text-blue-600 hover:underline flex items-center gap-1"
+                          >
+                            <Phone className="w-3 h-3 text-slate-400" />
+                            <span>{u.phone}</span>
+                          </a>
+                        ) : (
+                          <span className="text-red-400 italic text-[10px]">— ไม่มีเบอร์ (ไม่สามารถ Login ได้)</span>
+                        )}
                       </td>
 
                       {/* Role Badge */}
@@ -422,18 +458,23 @@ export default function EmployeesPage() {
                         </span>
                       </td>
 
-                      {/* Phone */}
-                      <td className="py-1.5 px-3 border-r border-slate-200 font-mono text-[11px]">
-                        {u.phone ? (
-                          <a
-                            href={`tel:${u.phone}`}
-                            className="text-blue-600 hover:underline flex items-center gap-1"
-                          >
-                            <Phone className="w-3 h-3 text-slate-400" />
-                            <span>{u.phone}</span>
-                          </a>
+                      {/* LINE Status */}
+                      <td className="py-1.5 px-2.5 text-center border-r border-slate-200">
+                        {hasLine ? (
+                          <div className="flex flex-col items-center gap-0.5">
+                            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-green-50 text-green-700 border border-green-200">
+                              <CheckCircle2 className="w-3 h-3" />
+                              ผูกแล้ว
+                            </span>
+                            {u.line_display_name && (
+                              <span className="text-[10px] text-slate-500 truncate max-w-[90px]">{u.line_display_name}</span>
+                            )}
+                          </div>
                         ) : (
-                          <span className="text-slate-400">-</span>
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-semibold bg-slate-100 text-slate-500 border border-slate-200">
+                            <XCircle className="w-3 h-3" />
+                            ยังไม่ผูก
+                          </span>
                         )}
                       </td>
 
@@ -463,7 +504,7 @@ export default function EmployeesPage() {
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
                           <button
-                            onClick={() => handleDelete(u.id, u.full_name || u.email || 'ผู้ใช้งาน')}
+                            onClick={() => handleDelete(u.id, u.full_name || u.phone || 'ผู้ใช้งาน')}
                             className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
                             title="ลบ"
                           >
@@ -492,6 +533,10 @@ export default function EmployeesPage() {
               พร้อมใช้งาน {stats.active} คน
             </span>
             <span className="flex items-center gap-1">
+              <span className="w-2 h-2 rounded-full bg-green-500 inline-block" />
+              ผูก LINE {stats.lineLinked} คน
+            </span>
+            <span className="flex items-center gap-1">
               <span className="w-2 h-2 rounded-full bg-slate-400 inline-block" />
               ระงับ {stats.total - stats.active} คน
             </span>
@@ -513,7 +558,9 @@ export default function EmployeesPage() {
                     {editId ? 'แก้ไขข้อมูลผู้ใช้งาน' : 'เพิ่มผู้ใช้งานระบบใหม่'}
                   </DialogTitle>
                   <p className="text-[11px] text-slate-500 mt-0.5">
-                    กำหนดบัญชีล็อกอินและระดับสิทธิ์การเข้าถึงข้อมูล
+                    {editId
+                      ? 'แก้ไขข้อมูลและสิทธิ์การใช้งาน'
+                      : 'เบอร์โทรที่ระบุจะใช้เป็น Login — ไม่ต้องใช้รหัสผ่าน'}
                   </p>
                 </div>
               </div>
@@ -533,20 +580,24 @@ export default function EmployeesPage() {
                 />
               </div>
 
-              {/* Email */}
+              {/* Phone — ใช้ Login */}
               <div className="space-y-1">
-                <Label htmlFor="user_email" className="text-xs font-semibold text-slate-700">
-                  อีเมล (Login Account) *
+                <Label htmlFor="user_phone" className="text-xs font-semibold text-slate-700">
+                  เบอร์โทรศัพท์ (ใช้ Login) *
                 </Label>
-                <Input
-                  id="user_email"
-                  type="email"
-                  value={formData.email}
-                  onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                  placeholder="เช่น somsak@company.com"
-                  required
-                  className="h-8 text-xs bg-white border-slate-300 text-slate-900"
-                />
+                <div className="relative">
+                  <Phone className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <Input
+                    id="user_phone"
+                    value={formData.phone}
+                    onChange={e => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                    placeholder="เช่น 081-234-5678"
+                    type="tel"
+                    required
+                    className="h-8 text-xs pl-8 bg-white border-slate-300 text-slate-900 font-mono tracking-widest"
+                  />
+                </div>
+                <p className="text-[10px] text-slate-400">เบอร์นี้จะใช้เข้าระบบ ไม่ต้องใช้รหัสผ่าน</p>
               </div>
 
               {/* Role Selection */}
@@ -595,18 +646,18 @@ export default function EmployeesPage() {
                 />
               </div>
 
-              {/* Phone */}
+              {/* Email (optional) */}
               <div className="space-y-1">
-                <Label htmlFor="user_phone" className="text-xs font-semibold text-slate-700">
-                  เบอร์โทรศัพท์ติดต่อ
+                <Label htmlFor="user_email" className="text-xs font-semibold text-slate-700">
+                  อีเมล <span className="font-normal text-slate-400">(ไม่บังคับ)</span>
                 </Label>
                 <Input
-                  id="user_phone"
-                  value={formData.phone}
-                  onChange={e => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-                  placeholder="เช่น 089-123-4567"
+                  id="user_email"
+                  type="email"
+                  value={formData.email}
+                  onChange={e => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                  placeholder="เช่น somsak@company.com"
                   className="h-8 text-xs bg-white border-slate-300 text-slate-900"
-                  type="tel"
                 />
               </div>
 
@@ -623,7 +674,7 @@ export default function EmployeesPage() {
                   />
                   <div>
                     <p className="text-xs font-semibold text-slate-800">เปิดสถานะพร้อมปฏิบัติงาน (Active)</p>
-                    <p className="text-[10px] text-slate-400">สามารถเข้าสู่ระบบและบันทึกงานได้</p>
+                    <p className="text-[10px] text-slate-400">สามารถเข้าสู่ระบบด้วยเบอร์โทรได้</p>
                   </div>
                 </div>
                 <Badge

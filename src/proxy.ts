@@ -1,46 +1,56 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { createServerClient } from '@supabase/ssr'
 
-export async function proxy(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({ request })
+/** Routes ที่ต้องการ session */
+const PROTECTED_PREFIXES = [
+  '/dashboard',
+  '/checklist',
+  '/employees',
+  '/contractors',
+  '/activities',
+  '/companies',
+  '/history',
+  '/line-oa',
+]
 
-  const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll()
-        },
-        setAll(cookiesToSet) {
-          cookiesToSet.forEach(({ name, value }) => request.cookies.set(name, value))
-          supabaseResponse = NextResponse.next({ request })
-          cookiesToSet.forEach(({ name, value, options }) =>
-            supabaseResponse.cookies.set(name, value, options)
-          )
-        },
-      },
-    }
+export function proxy(request: NextRequest) {
+  const { pathname } = request.nextUrl
+
+  // ข้าม Next.js internals, static files, favicon
+  if (
+    pathname.startsWith('/_next') ||
+    pathname.startsWith('/favicon') ||
+    pathname.includes('.')
+  ) {
+    return NextResponse.next()
+  }
+
+  // Public paths และ API routes ไม่ต้องดัก
+  if (
+    pathname.startsWith('/login') ||
+    pathname.startsWith('/api') ||
+    pathname.startsWith('/checklist-m')
+  ) {
+    return NextResponse.next()
+  }
+
+  const token = request.cookies.get('site_session')?.value
+
+  // ถ้าเข้าหน้าแรก '/'
+  if (pathname === '/') {
+    const target = token ? '/dashboard' : '/login'
+    return NextResponse.redirect(new URL(target, request.url))
+  }
+
+  // ตรวจ Protected routes
+  const isProtected = PROTECTED_PREFIXES.some(
+    prefix => pathname === prefix || pathname.startsWith(prefix + '/')
   )
 
-  const { data: { user } } = await supabase.auth.getUser()
-
-  const isAuthPage = request.nextUrl.pathname.startsWith('/login')
-  const isPublicPath = request.nextUrl.pathname === '/'
-
-  if (!user && !isAuthPage && !isPublicPath) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/login'
-    return NextResponse.redirect(url)
+  if (isProtected && !token) {
+    return NextResponse.redirect(new URL('/login', request.url))
   }
 
-  if (user && isAuthPage) {
-    const url = request.nextUrl.clone()
-    url.pathname = '/dashboard'
-    return NextResponse.redirect(url)
-  }
-
-  return supabaseResponse
+  return NextResponse.next()
 }
 
 export const config = {
