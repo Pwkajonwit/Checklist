@@ -14,6 +14,8 @@ export async function GET() {
   return NextResponse.json({ data })
 }
 
+import { formatCompanyCodePayload } from '@/lib/types'
+
 // POST /api/companies
 export async function POST(req: Request) {
   const session = await getSession()
@@ -22,11 +24,26 @@ export async function POST(req: Request) {
   const body = await req.json()
   const supabase = createServiceClient()
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('companies')
     .insert(body)
     .select()
     .single()
+
+  // Graceful fallback if phone or line_group columns are not yet added to DB
+  if (error && (error.code === 'PGRST204' || error.message?.includes('column'))) {
+    const fallbackBody = {
+      name: body.name,
+      code: formatCompanyCodePayload(body.code, body.phone, body.line_group),
+    }
+    const retry = await supabase
+      .from('companies')
+      .insert(fallbackBody)
+      .select()
+      .single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ data }, { status: 201 })

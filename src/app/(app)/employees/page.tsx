@@ -14,7 +14,7 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   Shield, ShieldCheck, Eye, Search, Plus, Pencil, Trash2,
-  RefreshCw, Loader2, Phone, CheckCircle2, XCircle, UserCog, Link2
+  RefreshCw, Loader2, Phone, CheckCircle2, XCircle, UserCog, Link2, Users
 } from 'lucide-react'
 
 interface UserProfileFull {
@@ -24,6 +24,7 @@ interface UserProfileFull {
   role: UserRole
   phone: string | null
   department: string | null
+  line_group: string | null
   is_active: boolean
   line_user_id: string | null
   line_display_name: string | null
@@ -37,6 +38,7 @@ interface UserFormData {
   email: string
   role: UserRole
   department: string
+  line_group: string
   phone: string
   is_active: boolean
 }
@@ -46,6 +48,7 @@ const defaultForm: UserFormData = {
   email: '',
   role: 'supervisor',
   department: '',
+  line_group: '',
   phone: '',
   is_active: true,
 }
@@ -123,8 +126,9 @@ export default function EmployeesPage() {
         const emailMatch = (u.email ?? '').toLowerCase().includes(q)
         const deptMatch = (u.department ?? '').toLowerCase().includes(q)
         const phoneMatch = (u.phone ?? '').toLowerCase().includes(q)
+        const groupMatch = (u.line_group ?? '').toLowerCase().includes(q)
         const lineMatch = (u.line_display_name ?? '').toLowerCase().includes(q)
-        if (!nameMatch && !emailMatch && !deptMatch && !phoneMatch && !lineMatch) return false
+        if (!nameMatch && !emailMatch && !deptMatch && !phoneMatch && !groupMatch && !lineMatch) return false
       }
       return true
     })
@@ -156,6 +160,7 @@ export default function EmployeesPage() {
       email: u.email ?? '',
       role: u.role,
       department: u.department ?? '',
+      line_group: u.line_group ?? '',
       phone: u.phone ?? '',
       is_active: u.is_active !== false,
     })
@@ -180,6 +185,7 @@ export default function EmployeesPage() {
       email: formData.email.trim().toLowerCase() || null,
       role: formData.role,
       department: formData.department.trim() || null,
+      line_group: formData.line_group.trim() || null,
       phone: formData.phone.trim() || null,
       is_active: formData.is_active,
     }
@@ -382,6 +388,7 @@ export default function EmployeesPage() {
                   <th className="py-2 px-3 border-r border-slate-300">เบอร์โทร (Login)</th>
                   <th className="py-2 px-3 border-r border-slate-300">บทบาท / สิทธิ์</th>
                   <th className="py-2 px-3 border-r border-slate-300">แผนก / สังกัด</th>
+                  <th className="py-2 px-3 border-r border-slate-300">กลุ่ม LINE</th>
                   <th className="py-2 px-3 border-r border-slate-300 text-center w-28">LINE</th>
                   <th className="py-2 px-2.5 text-center w-20 border-r border-slate-300">สถานะ</th>
                   <th className="py-2 px-2.5 text-center w-20">จัดการ</th>
@@ -456,6 +463,18 @@ export default function EmployeesPage() {
                         <span className="font-medium text-slate-700">
                           {u.department || '-'}
                         </span>
+                      </td>
+
+                      {/* LINE Group */}
+                      <td className="py-1.5 px-3 border-r border-slate-200">
+                        {u.line_group ? (
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-medium">
+                            <Users className="w-3 h-3 text-emerald-600" />
+                            <span>{u.line_group}</span>
+                          </span>
+                        ) : (
+                          <span className="text-slate-400 italic text-[11px]">—</span>
+                        )}
                       </td>
 
                       {/* LINE Status */}
@@ -642,6 +661,21 @@ export default function EmployeesPage() {
                   value={formData.department}
                   onChange={e => setFormData(prev => ({ ...prev, department: e.target.value }))}
                   placeholder="เช่น ฝ่ายความปลอดภัย (จป.), วิศวกรรม..."
+                  className="h-8 text-xs bg-white border-slate-300 text-slate-900"
+                />
+              </div>
+
+              {/* LINE Group */}
+              <div className="space-y-1">
+                <Label htmlFor="user_line_group" className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                  <Users className="w-3.5 h-3.5 text-emerald-600" />
+                  กลุ่ม LINE (Line Group) <span className="font-normal text-slate-400">(ไม่บังคับ)</span>
+                </Label>
+                <Input
+                  id="user_line_group"
+                  value={formData.line_group}
+                  onChange={e => setFormData(prev => ({ ...prev, line_group: e.target.value }))}
+                  placeholder="เช่น ทีมช่างอาคาร A, โครงการ 1..."
                   className="h-8 text-xs bg-white border-slate-300 text-slate-900"
                 />
               </div>

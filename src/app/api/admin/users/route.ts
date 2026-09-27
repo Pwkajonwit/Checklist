@@ -29,6 +29,7 @@ export async function GET() {
       phone: phone || null,
       email: u.email && u.email.endsWith('@phone.auth') ? null : u.email,
       department: u.department || (u.role === 'admin' ? 'สำนักงานใหญ่' : '-'),
+      line_group: u.line_group || null,
       is_active: u.is_active ?? true,
     }
   })
@@ -82,6 +83,7 @@ export async function POST(req: Request) {
     email: body.email || authEmail,
     role: body.role,
     department: body.department || null,
+    line_group: body.line_group || null,
     phone: phone,
     is_active: body.is_active ?? true,
     updated_at: new Date().toISOString(),
@@ -93,17 +95,21 @@ export async function POST(req: Request) {
     .select()
     .single()
 
-  // กรณีฐานข้อมูลยังไม่มีคอลัมน์ phone/department/is_active
+  // กรณีฐานข้อมูลยังไม่มีคอลัมน์ phone/department/line_group/is_active
   if (error && error.message.includes('column')) {
-    const basicPayload = {
-      id: userId,
-      full_name: body.full_name,
-      email: authEmail,
-      role: body.role,
-      updated_at: new Date().toISOString(),
+    const { line_group, ...fallbackWithoutGroup } = insertPayload
+    let res = await supabase.from('user_profiles').upsert(fallbackWithoutGroup).select().single()
+    if (res.error && res.error.message.includes('column')) {
+      const basicPayload = {
+        id: userId,
+        full_name: body.full_name,
+        email: authEmail,
+        role: body.role,
+        updated_at: new Date().toISOString(),
+      }
+      res = await supabase.from('user_profiles').upsert(basicPayload).select().single()
     }
-    const res = await supabase.from('user_profiles').upsert(basicPayload).select().single()
-    data = res.data ? { ...res.data, phone: phone, department: body.department, is_active: true } : null
+    data = res.data ? { ...res.data, phone: phone, department: body.department, line_group: body.line_group, is_active: true } : null
     error = res.error
   }
 

@@ -356,8 +356,8 @@ export function MobileActivitiesView() {
                 {/* Header Row: Code badge, Name, Edit/Delete */}
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-950 border border-purple-300 flex items-center justify-center font-bold text-xs shrink-0">
-                      {a.code || <Layers className="w-4 h-4" />}
+                    <div className="w-8 h-8 rounded-lg bg-purple-100 text-purple-800 border border-purple-300 flex items-center justify-center shrink-0">
+                      <Layers className="w-4 h-4" />
                     </div>
 
                     <div className="min-w-0">

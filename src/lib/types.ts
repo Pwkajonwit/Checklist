@@ -7,6 +7,7 @@ export interface UserProfile {
   role: UserRole
   phone?: string | null
   department?: string | null
+  line_group?: string | null
   is_active?: boolean
   created_at: string
   updated_at: string
@@ -16,7 +17,52 @@ export interface Company {
   id: string
   name: string
   code: string | null
+  phone?: string | null
+  line_group?: string | null
   created_at: string
+}
+
+export function cleanCompanyCode(code?: string | null): string | null {
+  if (!code) return null
+  const cleaned = code
+    .replace(/\[(?:TEL|PHONE):?\s*[^\]]+\]/gi, '')
+    .replace(/\[(?:LINE|GROUP):?\s*[^\]]+\]/gi, '')
+    .trim()
+  return cleaned || null
+}
+
+export function getCompanyPhone(c?: Partial<Company> | null): string {
+  if (!c) return ''
+  if (c.phone) return c.phone
+  if (c.code) {
+    const match = c.code.match(/\[(?:TEL|PHONE):?\s*([^\]]+)\]/i)
+    if (match) return match[1].trim()
+  }
+  return ''
+}
+
+export function getCompanyLineGroup(c?: Partial<Company> | null): string {
+  if (!c) return ''
+  if (c.line_group) return c.line_group
+  if (c.code) {
+    const match = c.code.match(/\[(?:LINE|GROUP):?\s*([^\]]+)\]/i)
+    if (match) return match[1].trim()
+  }
+  return ''
+}
+
+export function formatCompanyCodePayload(
+  code?: string | null,
+  phone?: string | null,
+  lineGroup?: string | null
+): string | null {
+  const baseCode = cleanCompanyCode(code) || ''
+  const tags: string[] = []
+  if (phone?.trim()) tags.push(`[TEL:${phone.trim()}]`)
+  if (lineGroup?.trim()) tags.push(`[LINE:${lineGroup.trim()}]`)
+
+  if (tags.length === 0) return baseCode || null
+  return `${baseCode} ${tags.join(' ')}`.trim()
 }
 
 export interface Contractor {
@@ -227,6 +273,7 @@ export interface NotificationConfig {
   line_channel_access_token: string
   line_target_id: string
   line_broadcast: boolean
+  line_liff_id?: string
 
   telegram_enabled: boolean
   telegram_bot_token: string
@@ -243,6 +290,7 @@ export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
   line_channel_access_token: '',
   line_target_id: '',
   line_broadcast: false,
+  line_liff_id: '',
   telegram_enabled: false,
   telegram_bot_token: '',
   telegram_chat_id: '',

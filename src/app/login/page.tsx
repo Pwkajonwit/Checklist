@@ -16,7 +16,7 @@ declare global {
       init: (config: { liffId: string }) => Promise<void>
       isInClient: () => boolean
       isLoggedIn: () => boolean
-      login: () => void
+      login: (config?: { redirectUri?: string }) => void
       getProfile: () => Promise<{ userId: string; displayName: string; pictureUrl?: string }>
       ready: Promise<void>
     }
@@ -35,6 +35,34 @@ function LoginForm() {
   const [submitting, setSubmitting] = useState(false)
   const [liffReady, setLiffReady] = useState(false)
   const [liffLoading, setLiffLoading] = useState(false)
+  const [liffId, setLiffId] = useState(process.env.NEXT_PUBLIC_LIFF_ID ?? '')
+
+  const returnUrl = searchParams.get('returnUrl') || searchParams.get('redirect') || '/checklist-m'
+
+  // โหลด LIFF ID จาก API หากไม่ได้ตั้งใน env
+  useEffect(() => {
+    if (!liffId) {
+      fetch('/api/auth/liff-config')
+        .then(r => r.json())
+        .then(res => {
+          if (res?.liffId) setLiffId(res.liffId)
+        })
+        .catch(() => {})
+    }
+  }, [liffId])
+
+  // Helper ซิงก์โปรไฟล์ลง localStorage สำหรับมือถือ
+  const syncMobileUser = (user: any, method: 'line' | 'phone') => {
+    if (typeof window !== 'undefined' && user) {
+      localStorage.setItem('sitecheck_mobile_user', JSON.stringify({
+        id: user.userId || user.id,
+        name: user.full_name,
+        phone: user.phone,
+        role: user.role,
+        authMethod: method,
+      }))
+    }
+  }
 
   // สำหรับขั้นตอนผูก LINE
   const [pendingLine, setPendingLine] = useState<{
@@ -48,13 +76,13 @@ function LoginForm() {
 
   // ── Auto LIFF Login ──
   useEffect(() => {
-    if (!LIFF_ID) return
+    if (!liffId) return
     // โหลด LIFF SDK แล้ว init
     const tryLiff = async () => {
       if (!window.liff) return
       setLiffLoading(true)
       try {
-        await window.liff.init({ liffId: LIFF_ID })
+        await window.liff.init({ liffId })
         setLiffReady(true)
 
         if (window.liff.isInClient()) {
@@ -70,7 +98,7 @@ function LoginForm() {
     }
     tryLiff()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [liffReady])
+  }, [liffReady, liffId])
 
   const handleLiffScriptLoad = () => {
     setLiffReady(true)
@@ -78,15 +106,15 @@ function LoginForm() {
 
   // ── LINE Login (จาก browser ปกติ คลิกปุ่ม) ──
   const handleLineButtonClick = async () => {
-    if (!LIFF_ID) {
-      toast.error('ยังไม่ได้ตั้งค่า LIFF ID')
+    if (!liffId) {
+      toast.error('ยังไม่ได้ตั้งค่า LIFF ID (กรุณาตั้งค่าในระบบหรือ .env.local)')
       return
     }
     setLiffLoading(true)
     try {
-      await window.liff.init({ liffId: LIFF_ID })
+      await window.liff.init({ liffId })
       if (!window.liff.isLoggedIn()) {
-        window.liff.login()
+        window.liff.login({ redirectUri: window.location.href })
         return
       }
       const profile = await window.liff.getProfile()
@@ -112,7 +140,8 @@ function LoginForm() {
     if (res.ok && data.linked) {
       // ผูกแล้ว → เข้าระบบ
       toast.success(`ยินดีต้อนรับ ${data.user?.full_name ?? displayName} 👋`)
-      router.push('/checklist')
+      syncMobileUser(data.user, 'line')
+      router.push(returnUrl)
       router.refresh()
     } else if (res.ok && !data.linked) {
       // ยังไม่ผูก → ขอเบอร์โทร
@@ -142,7 +171,8 @@ function LoginForm() {
         return
       }
       toast.success(`ยินดีต้อนรับ ${data.user?.full_name ?? ''} 👋`)
-      router.push('/checklist')
+      syncMobileUser(data.user, 'phone')
+      router.push(returnUrl)
       router.refresh()
     } finally {
       setSubmitting(false)
@@ -171,7 +201,8 @@ function LoginForm() {
         return
       }
       toast.success(`ผูก LINE สำเร็จ! ยินดีต้อนรับ ${data.user?.full_name ?? ''} 👋`)
-      router.push('/checklist')
+      syncMobileUser(data.user, 'line')
+      router.push(returnUrl)
       router.refresh()
     } finally {
       setSubmitting(false)
@@ -181,7 +212,7 @@ function LoginForm() {
   return (
     <>
       {/* โหลด LIFF SDK */}
-      {LIFF_ID && (
+      {liffId && (
         <Script
           src="https://static.line-scdn.net/liff/edge/2/sdk.js"
           onLoad={handleLiffScriptLoad}

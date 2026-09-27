@@ -11,12 +11,15 @@ import { Label } from '@/components/ui/label'
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter
 } from '@/components/ui/dialog'
-import { Plus, Pencil, Trash2, Search, Building2, Loader2, RefreshCw } from 'lucide-react'
+import { Plus, Pencil, Trash2, Search, Building2, Loader2, RefreshCw, Phone, MessageSquare } from 'lucide-react'
+import { cleanCompanyCode, getCompanyPhone, getCompanyLineGroup, formatCompanyCodePayload } from '@/lib/types'
 
 interface CompanyData {
   id: string
   name: string
   code: string | null
+  phone?: string | null
+  line_group?: string | null
   created_at: string
 }
 
@@ -29,6 +32,8 @@ export default function CompaniesPage() {
   const [editId, setEditId] = useState<string | null>(null)
   const [formName, setFormName] = useState('')
   const [formCode, setFormCode] = useState('')
+  const [formPhone, setFormPhone] = useState('')
+  const [formLineGroup, setFormLineGroup] = useState('')
   const [saving, setSaving] = useState(false)
 
   const fetchData = useCallback(async () => {
@@ -56,23 +61,34 @@ export default function CompaniesPage() {
   const filtered = useMemo(() => {
     if (!search.trim()) return companies
     const q = search.toLowerCase()
-    return companies.filter(c =>
-      c.name.toLowerCase().includes(q) ||
-      (c.code ?? '').toLowerCase().includes(q)
-    )
+    return companies.filter(c => {
+      const code = cleanCompanyCode(c.code) ?? ''
+      const phone = getCompanyPhone(c)
+      const lineGroup = getCompanyLineGroup(c)
+      return (
+        c.name.toLowerCase().includes(q) ||
+        code.toLowerCase().includes(q) ||
+        phone.toLowerCase().includes(q) ||
+        lineGroup.toLowerCase().includes(q)
+      )
+    })
   }, [companies, search])
 
   const openCreate = () => {
     setEditId(null)
     setFormName('')
     setFormCode('')
+    setFormPhone('')
+    setFormLineGroup('')
     setDialogOpen(true)
   }
 
   const openEdit = (c: CompanyData) => {
     setEditId(c.id)
     setFormName(c.name)
-    setFormCode(c.code ?? '')
+    setFormCode(cleanCompanyCode(c.code) ?? '')
+    setFormPhone(getCompanyPhone(c))
+    setFormLineGroup(getCompanyLineGroup(c))
     setDialogOpen(true)
   }
 
@@ -85,7 +101,9 @@ export default function CompaniesPage() {
     setSaving(true)
     const payload = {
       name: formName.trim(),
-      code: formCode.trim() ? formCode.trim().toUpperCase() : null
+      code: formatCompanyCodePayload(formCode, formPhone, formLineGroup),
+      phone: formPhone.trim() || null,
+      line_group: formLineGroup.trim() || null,
     }
 
     try {
@@ -150,7 +168,7 @@ export default function CompaniesPage() {
             <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
             <input
               type="search"
-              placeholder="ค้นหาชื่อบริษัท, รหัสย่อ..."
+              placeholder="ค้นหาชื่อบริษัท, รหัสย่อ, เบอร์, กลุ่ม LINE..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="w-full text-xs pl-8 pr-2.5 py-1 rounded border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -183,15 +201,17 @@ export default function CompaniesPage() {
               <tr className="border-b border-slate-300 text-slate-700 text-[11px]">
                 <th className="py-2 px-2 w-12 text-center font-bold border-r border-slate-300">#</th>
                 <th className="py-2 px-2.5 w-28 font-bold border-r border-slate-300">รหัสย่อ (Code)</th>
-                <th className="py-2 px-3 font-bold border-r border-slate-300 min-w-[200px]">ชื่อสังกัด / บริษัท</th>
-                <th className="py-2 px-3 w-36 font-bold border-r border-slate-300">วันที่สร้าง</th>
+                <th className="py-2 px-3 font-bold border-r border-slate-300 min-w-[180px]">ชื่อสังกัด / บริษัท</th>
+                <th className="py-2 px-3 w-36 font-bold border-r border-slate-300">เบอร์ติดต่อ</th>
+                <th className="py-2 px-3 w-44 font-bold border-r border-slate-300">กลุ่ม LINE (Line Group)</th>
+                <th className="py-2 px-3 w-32 font-bold border-r border-slate-300">วันที่สร้าง</th>
                 <th className="py-2 px-2 text-center w-20 font-bold">จัดการ</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-400">
+                  <td colSpan={7} className="py-12 text-center text-slate-400">
                     <div className="flex items-center justify-center gap-2 text-xs font-medium">
                       <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
                       <span>กำลังโหลดข้อมูลบริษัท...</span>
@@ -200,7 +220,7 @@ export default function CompaniesPage() {
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="py-12 text-center text-slate-400 text-xs">
+                  <td colSpan={7} className="py-12 text-center text-slate-400 text-xs">
                     ไม่พบข้อมูลบริษัท{search ? ` ที่ตรงกับ "${search}"` : ''}
                   </td>
                 </tr>
@@ -217,7 +237,7 @@ export default function CompaniesPage() {
 
                     {/* Code */}
                     <td className="py-1.5 px-2.5 font-mono text-[11px] font-bold text-blue-700 border-r border-slate-200">
-                      {c.code || <span className="text-slate-300 font-normal">—</span>}
+                      {cleanCompanyCode(c.code) || <span className="text-slate-300 font-normal">—</span>}
                     </td>
 
                     {/* Name */}
@@ -225,9 +245,42 @@ export default function CompaniesPage() {
                       {c.name}
                     </td>
 
+                    {/* Phone */}
+                    <td className="py-1.5 px-3 border-r border-slate-200">
+                      {(() => {
+                        const phone = getCompanyPhone(c)
+                        return phone ? (
+                          <a
+                            href={`tel:${phone}`}
+                            className="inline-flex items-center gap-1.5 text-sky-700 hover:text-sky-900 font-mono text-[11px] font-medium hover:underline"
+                          >
+                            <Phone className="w-3 h-3 text-sky-600" />
+                            <span>{phone}</span>
+                          </a>
+                        ) : (
+                          <span className="text-slate-300 font-normal">—</span>
+                        )
+                      })()}
+                    </td>
+
+                    {/* Line Group */}
+                    <td className="py-1.5 px-3 border-r border-slate-200">
+                      {(() => {
+                        const lineGroup = getCompanyLineGroup(c)
+                        return lineGroup ? (
+                          <div className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200 text-[11px] font-medium max-w-[160px] truncate">
+                            <MessageSquare className="w-3 h-3 text-[#06C755] shrink-0" />
+                            <span className="truncate">{lineGroup}</span>
+                          </div>
+                        ) : (
+                          <span className="text-slate-300 font-normal">—</span>
+                        )
+                      })()}
+                    </td>
+
                     {/* Created date */}
                     <td className="py-1.5 px-3 text-slate-500 font-mono text-[11px] border-r border-slate-200">
-                      {c.created_at ? format(new Date(c.created_at), 'dd/MM/yyyy HH:mm') : '—'}
+                      {c.created_at ? format(new Date(c.created_at), 'dd/MM/yyyy') : '—'}
                     </td>
 
                     {/* Actions */}
@@ -300,6 +353,36 @@ export default function CompaniesPage() {
                   placeholder="เช่น CHL, RCT"
                   className="h-8 text-xs font-mono uppercase"
                 />
+              </div>
+
+              <div>
+                <Label className="text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <Phone className="w-3.5 h-3.5 text-sky-600" />
+                  <span>เบอร์ติดต่อแผนก / สังกัด</span>
+                </Label>
+                <Input
+                  type="tel"
+                  value={formPhone}
+                  onChange={e => setFormPhone(e.target.value)}
+                  placeholder="เช่น 081-234-5678"
+                  className="h-8 text-xs font-mono"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1.5">
+                  <MessageSquare className="w-3.5 h-3.5 text-[#06C755]" />
+                  <span>กลุ่ม LINE (Line Group Name หรือ ID)</span>
+                </Label>
+                <Input
+                  value={formLineGroup}
+                  onChange={e => setFormLineGroup(e.target.value)}
+                  placeholder="เช่น กลุ่มช่างอาคาร A หรือ Group ID"
+                  className="h-8 text-xs"
+                />
+                <p className="text-[10px] text-slate-400 mt-1">
+                  ใช้สำหรับการเปิดฟอร์มส่งข้อความแจ้งเตือนและประสานงานด่วนเข้า LINE กลุ่มของสังกัดนี้ในหน้าเช็คลิสต์
+                </p>
               </div>
             </div>
 

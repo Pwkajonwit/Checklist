@@ -12,13 +12,21 @@ import {
 } from '@/components/ui/dialog'
 import {
   Building2, Plus, Search, Pencil, Trash2,
-  RefreshCw, Loader2, Calendar, Hash
+  RefreshCw, Loader2, Calendar, Hash, Phone, MessageSquare
 } from 'lucide-react'
+import {
+  cleanCompanyCode,
+  getCompanyPhone,
+  getCompanyLineGroup,
+  formatCompanyCodePayload,
+} from '@/lib/types'
 
 interface CompanyData {
   id: string
   name: string
   code: string | null
+  phone?: string | null
+  line_group?: string | null
   created_at: string
 }
 
@@ -34,6 +42,8 @@ export function MobileCompaniesView() {
   const [editId, setEditId] = useState<string | null>(null)
   const [formName, setFormName] = useState('')
   const [formCode, setFormCode] = useState('')
+  const [formPhone, setFormPhone] = useState('')
+  const [formLineGroup, setFormLineGroup] = useState('')
   const [saving, setSaving] = useState(false)
 
   const fetchData = useCallback(async (isSilent = false) => {
@@ -64,22 +74,34 @@ export function MobileCompaniesView() {
   const filtered = useMemo(() => {
     if (!search.trim()) return companies
     const q = search.toLowerCase()
-    return companies.filter(
-      c => c.name.toLowerCase().includes(q) || (c.code ?? '').toLowerCase().includes(q)
-    )
+    return companies.filter(c => {
+      const code = cleanCompanyCode(c.code) ?? ''
+      const phone = getCompanyPhone(c)
+      const lineGroup = getCompanyLineGroup(c)
+      return (
+        c.name.toLowerCase().includes(q) ||
+        code.toLowerCase().includes(q) ||
+        phone.toLowerCase().includes(q) ||
+        lineGroup.toLowerCase().includes(q)
+      )
+    })
   }, [companies, search])
 
   const openCreate = () => {
     setEditId(null)
     setFormName('')
     setFormCode('')
+    setFormPhone('')
+    setFormLineGroup('')
     setDialogOpen(true)
   }
 
   const openEdit = (c: CompanyData) => {
     setEditId(c.id)
     setFormName(c.name)
-    setFormCode(c.code ?? '')
+    setFormCode(cleanCompanyCode(c.code) ?? '')
+    setFormPhone(getCompanyPhone(c))
+    setFormLineGroup(getCompanyLineGroup(c))
     setDialogOpen(true)
   }
 
@@ -91,17 +113,32 @@ export function MobileCompaniesView() {
     }
 
     setSaving(true)
-    const payload = {
+    const codePayload = formatCompanyCodePayload(formCode, formPhone, formLineGroup)
+    const payloadFull = {
       name: formName.trim(),
-      code: formCode.trim() ? formCode.trim().toUpperCase() : null,
+      code: codePayload,
+      phone: formPhone.trim() || null,
+      line_group: formLineGroup.trim() || null,
+    }
+    const payloadFallback = {
+      name: formName.trim(),
+      code: codePayload,
     }
 
     try {
       let err
       if (editId) {
-        ;({ error: err } = await supabase.from('companies').update(payload).eq('id', editId))
+        let res = await supabase.from('companies').update(payloadFull).eq('id', editId)
+        if (res.error && (res.error.code === 'PGRST204' || res.error.message?.includes('column'))) {
+          res = await supabase.from('companies').update(payloadFallback).eq('id', editId)
+        }
+        err = res.error
       } else {
-        ;({ error: err } = await supabase.from('companies').insert(payload))
+        let res = await supabase.from('companies').insert(payloadFull)
+        if (res.error && (res.error.code === 'PGRST204' || res.error.message?.includes('column'))) {
+          res = await supabase.from('companies').insert(payloadFallback)
+        }
+        err = res.error
       }
 
       if (err) throw err
@@ -209,8 +246,8 @@ export function MobileCompaniesView() {
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-center gap-2.5 min-w-0">
-                  <div className="w-9 h-9 rounded-lg bg-cyan-100 text-cyan-950 border border-cyan-300 flex items-center justify-center font-bold text-xs shrink-0">
-                    {c.code || c.name.charAt(0) || <Building2 className="w-4 h-4" />}
+                  <div className="w-9 h-9 rounded-lg bg-cyan-100 text-cyan-800 border border-cyan-300 flex items-center justify-center shrink-0">
+                    <Building2 className="w-4 h-4" />
                   </div>
 
                   <div className="min-w-0">
@@ -218,16 +255,42 @@ export function MobileCompaniesView() {
                       <h2 className="text-xs font-semibold text-slate-900 leading-tight">
                         {c.name}
                       </h2>
-                      {c.code && (
+                      {cleanCompanyCode(c.code) && (
                         <span className="px-2 py-0.5 rounded font-bold text-xs bg-cyan-50 text-cyan-800 border border-cyan-300">
-                          [{c.code}]
+                          [{cleanCompanyCode(c.code)}]
                         </span>
                       )}
                     </div>
 
+                    {/* Phone & Line Group Badges */}
+                    {(() => {
+                      const phone = getCompanyPhone(c)
+                      const lineGroup = getCompanyLineGroup(c)
+                      if (!phone && !lineGroup) return null
+                      return (
+                        <div className="flex items-center gap-1.5 flex-wrap mt-1">
+                          {phone && (
+                            <a
+                              href={`tel:${phone}`}
+                              className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded hover:bg-sky-100"
+                            >
+                              <Phone className="w-3 h-3 text-sky-600" />
+                              <span>{phone}</span>
+                            </a>
+                          )}
+                          {lineGroup && (
+                            <div className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded max-w-[150px] truncate">
+                              <MessageSquare className="w-3 h-3 text-[#06C755] shrink-0" />
+                              <span className="truncate">{lineGroup}</span>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })()}
+
                     {c.created_at && (
-                      <span className="text-xs text-slate-600 font-normal flex items-center gap-1 mt-0.5">
-                        <Calendar className="w-3 h-3 text-slate-500" />
+                      <span className="text-[11px] text-slate-500 font-normal flex items-center gap-1 mt-1">
+                        <Calendar className="w-3 h-3 text-slate-400" />
                         สร้างเมื่อ {format(new Date(c.created_at), 'dd/MM/yyyy')}
                       </span>
                     )}
@@ -297,6 +360,33 @@ export function MobileCompaniesView() {
                   onChange={e => setFormCode(e.target.value)}
                   placeholder="เช่น CHL, CDR"
                   className="h-9 text-xs uppercase mt-1 bg-white border-slate-300 text-slate-900 font-normal"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs font-semibold text-slate-800 flex items-center gap-1">
+                  <Phone className="w-3.5 h-3.5 text-sky-600" />
+                  เบอร์ติดต่อสังกัด
+                </Label>
+                <Input
+                  type="tel"
+                  value={formPhone}
+                  onChange={e => setFormPhone(e.target.value)}
+                  placeholder="เช่น 081-234-5678"
+                  className="h-9 text-xs mt-1 bg-white border-slate-300 text-slate-900 font-mono"
+                />
+              </div>
+
+              <div>
+                <Label className="text-xs font-semibold text-slate-800 flex items-center gap-1">
+                  <MessageSquare className="w-3.5 h-3.5 text-[#06C755]" />
+                  กลุ่ม LINE (Line Group Name หรือ ID)
+                </Label>
+                <Input
+                  value={formLineGroup}
+                  onChange={e => setFormLineGroup(e.target.value)}
+                  placeholder="เช่น กลุ่มช่างอาคาร A หรือ Group ID"
+                  className="h-9 text-xs mt-1 bg-white border-slate-300 text-slate-900 font-normal"
                 />
               </div>
             </div>

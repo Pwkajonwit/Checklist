@@ -175,6 +175,19 @@ export default function LineOAPage() {
     return buildDailyLineFlexMessage(report)
   }, [report])
 
+  const flexBubbles = useMemo(() => {
+    return (flexMessage?.contents?.contents as any[]) || []
+  }, [flexMessage])
+
+  const activeCompanies = useMemo(() => {
+    return (report.companies || []).filter(c => c.checkedInCount > 0)
+  }, [report.companies])
+
+  const CHUNK_SIZE = 7
+  const totalOverviewChunks = useMemo(() => {
+    return Math.max(1, Math.ceil(activeCompanies.length / CHUNK_SIZE))
+  }, [activeCompanies.length])
+
   // Formatted Text Message
   const lineTextMessage = useMemo(() => {
     return formatDailyLineMessage(report)
@@ -188,11 +201,11 @@ export default function LineOAPage() {
 
   // Reset bubble index if out of bounds
   useEffect(() => {
-    const maxIdx = report.companies.length // 0 is Overview, 1..N are companies
-    if (activeBubbleIdx > maxIdx) {
+    const totalBubbles = flexBubbles.length || 1
+    if (activeBubbleIdx >= totalBubbles) {
       setActiveBubbleIdx(0)
     }
-  }, [report, activeBubbleIdx])
+  }, [flexBubbles.length, activeBubbleIdx])
 
   // Next upcoming scheduled slot
   const nextScheduledSlot = useMemo(() => {
@@ -637,6 +650,44 @@ export default function LineOAPage() {
                         </div>
                       </div>
 
+                      {/* แสดงรายการโครงการย่อย เมื่อคนในทีมแยกทำหลายโครงการ */}
+                      {c.projects && c.projects.length > 1 && (
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 space-y-1">
+                          <div className="text-[10px] font-bold text-blue-800 flex items-center gap-1">
+                            <span>แยกปฏิบัติงาน {c.projects.length} โครงการ:</span>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                            {c.projects.map((p, pIdx) => (
+                              <div
+                                key={pIdx}
+                                className="bg-slate-50 border border-slate-200/80 rounded p-1.5 text-[11px] flex flex-col justify-between"
+                              >
+                                <div className="flex items-center justify-between gap-1">
+                                  <span className="font-semibold text-blue-700 truncate">
+                                    {p.activityTag || p.activityName}
+                                  </span>
+                                  {p.location && (
+                                    <span className="text-slate-500 text-[10px] shrink-0">
+                                      📍 {p.location}
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2 text-[10px] mt-1">
+                                  <span className="text-emerald-700 font-bold">
+                                    เข้างาน {p.checkedInCount} คน
+                                  </span>
+                                  {p.failedCount > 0 && (
+                                    <span className="text-red-600 font-bold">
+                                      ตก {p.failedCount} คน
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       {/* Problem details if any */}
                       {c.failedMembers && c.failedMembers.length > 0 && (
                         <div className="mt-2.5 pt-2 border-t border-red-100 bg-red-50/50 p-2 rounded text-[11px] space-y-1">
@@ -702,34 +753,38 @@ export default function LineOAPage() {
 
             {/* Bubble Selector (When in Flex mode) */}
             {formatMode === 'flex' && (
-              <div className="px-3 py-1.5 bg-slate-200/70 border-b border-slate-300 flex items-center justify-between shrink-0">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setActiveBubbleIdx(0)}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors ${
-                      activeBubbleIdx === 0
-                        ? 'bg-emerald-700 text-white shadow-2xs'
-                        : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300'
-                    }`}
-                  >
-                    Bubble 1: สรุปความปลอดภัย (Frame 2)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setActiveBubbleIdx(1)}
-                    className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors ${
-                      activeBubbleIdx === 1
-                        ? 'bg-blue-800 text-white shadow-2xs'
-                        : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300'
-                    }`}
-                  >
-                    Bubble 2: แจ้งความประสงค์ ({report.companies.reduce((sum, c) => sum + c.lateOrRequests.length, 0)}) (Frame 3)
-                  </button>
+              <div className="px-3 py-1.5 bg-slate-200/70 border-b border-slate-300 flex items-center justify-between shrink-0 overflow-x-auto">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {flexBubbles.map((_, bIdx) => {
+                    const isRequestsBubble = bIdx === flexBubbles.length - 1
+                    const label = isRequestsBubble
+                      ? `Bubble ${bIdx + 1}: แจ้งความประสงค์ (${report.companies.reduce((sum, c) => sum + c.lateOrRequests.length, 0)})`
+                      : totalOverviewChunks > 1
+                      ? `Bubble ${bIdx + 1}: สรุปความปลอดภัย (${bIdx + 1}/${totalOverviewChunks})`
+                      : `Bubble 1: สรุปความปลอดภัย`
+
+                    const isActive = activeBubbleIdx === bIdx
+                    return (
+                      <button
+                        key={bIdx}
+                        type="button"
+                        onClick={() => setActiveBubbleIdx(bIdx)}
+                        className={`px-2.5 py-1 text-xs font-bold rounded-md transition-colors ${
+                          isActive
+                            ? isRequestsBubble
+                              ? 'bg-blue-800 text-white shadow-2xs'
+                              : 'bg-emerald-700 text-white shadow-2xs'
+                            : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    )
+                  })}
                 </div>
 
-                <span className="text-[11px] text-slate-500 font-medium">
-                  {activeBubbleIdx === 0 ? '1 / 2' : '2 / 2'}
+                <span className="text-[11px] text-slate-500 font-medium shrink-0 ml-2">
+                  {activeBubbleIdx + 1} / {flexBubbles.length || 1}
                 </span>
               </div>
             )}
@@ -737,97 +792,182 @@ export default function LineOAPage() {
             {/* Preview Body */}
             <div className="flex-1 overflow-y-auto p-4 bg-[#748792]/20 flex flex-col items-center justify-start scrollbar-thin">
               {formatMode === 'flex' ? (
-                /* Authentic LINE Flex Bubble (Frame 2 / Frame 3) */
-                activeBubbleIdx === 0 ? (
-                  /* ── Bubble 1: สรุปการเข้างานและความปลอดภัย (Frame 2) ── */
+                /* Authentic LINE Flex Bubble (Multi-Bubble Overview or Requests) */
+                activeBubbleIdx < totalOverviewChunks ? (
+                  /* ── Bubble สรุปการเข้างานและความปลอดภัย ── */
                   <div className="w-full max-w-[380px] bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden text-slate-900">
                     {/* Green Header */}
                     <div className="bg-[#286b13] p-3 text-white">
                       <h4 className="text-xs font-bold leading-tight">
-                        การเข้า-ออก และตรวจสอบความปลอดภัยประจำวัน
+                        {totalOverviewChunks > 1
+                          ? `การเข้า-ออก และตรวจสอบความปลอดภัย (${activeBubbleIdx + 1}/${totalOverviewChunks})`
+                          : 'การเข้า-ออก และตรวจสอบความปลอดภัยประจำวัน'}
                       </h4>
                     </div>
 
                     {/* Body */}
                     <div className="p-3 space-y-3">
-                      {/* 3 Summary Badges */}
-                      <div className="grid grid-cols-3 gap-2">
-                        <div className="bg-[#dcfce7] rounded-lg p-2 text-center">
-                          <span className="text-[11px] font-bold text-[#14532d] block">
-                            ทีมงานรวม {report.totalPassed}
-                          </span>
+                      {/* 3 Summary Badges (เฉพาะ Bubble แรก) */}
+                      {activeBubbleIdx === 0 && (
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="bg-[#dcfce7] rounded-lg p-2 text-center">
+                            <span className="text-[11px] font-bold text-[#14532d] block">
+                              ทีมงานรวม {report.totalPassed}
+                            </span>
+                          </div>
+                          <div className="bg-[#fef3c7] rounded-lg p-2 text-center">
+                            <span className="text-[11px] font-bold text-[#92400e] block">
+                              ไม่มา {report.totalMissing}
+                            </span>
+                          </div>
+                          <div className="bg-[#dbeafe] rounded-lg p-2 text-center">
+                            <span className="text-[11px] font-bold text-[#1e40af] block">
+                              ประสงค์ {report.companies.reduce((sum, c) => sum + c.lateOrRequests.length, 0)}
+                            </span>
+                          </div>
                         </div>
-                        <div className="bg-[#fef3c7] rounded-lg p-2 text-center">
-                          <span className="text-[11px] font-bold text-[#92400e] block">
-                            ไม่มา {report.totalMissing}
-                          </span>
-                        </div>
-                        <div className="bg-[#dbeafe] rounded-lg p-2 text-center">
-                          <span className="text-[11px] font-bold text-[#1e40af] block">
-                            ประสงค์ {report.companies.reduce((sum, c) => sum + c.lateOrRequests.length, 0)}
-                          </span>
-                        </div>
-                      </div>
+                      )}
 
-                      {/* Company List (Up to 12) */}
-                      <div className="space-y-2.5 pt-1">
-                        {report.companies.slice(0, 12).map((comp, idx) => {
-                          const actTag =
-                            comp.activityTag ||
-                            (comp.activityName && comp.companyCode
-                              ? `[${comp.companyCode}] ${comp.activityName}`
-                              : comp.activityName || (comp.companyCode ? `[${comp.companyCode}]` : ''))
-
-                          return (
-                            <div key={comp.companyName} className="space-y-1">
-                              {/* Line 1: Company Name & Activity */}
-                              <div className="flex items-baseline justify-between gap-1 text-xs">
-                                <span className="font-bold text-slate-900 truncate">
-                                  {comp.companyName}
+                      {/* Active Companies List for this Chunk */}
+                      <div className="space-y-2 pt-1">
+                        {(() => {
+                          if (activeCompanies.length === 0) {
+                            return (
+                              <div className="bg-slate-50 rounded-lg p-3 text-center">
+                                <span className="text-xs font-semibold text-slate-600 block">
+                                  ⏳ ยังไม่มีข้อมูลการเข้างานในวันนี้
                                 </span>
-                                {actTag && (
-                                  <span className="font-bold text-blue-600 text-[11px] shrink-0">
-                                    {actTag}
-                                  </span>
-                                )}
+                                <span className="text-[10px] text-slate-400 mt-0.5 block">
+                                  ระบบจะอัปเดตอัตโนมัติเมื่อทีมงานเริ่มเช็คชื่อ
+                                </span>
                               </div>
+                            )
+                          }
 
-                              {/* Line 2: Attendance Stats & Location */}
-                              <div className="flex items-center justify-between text-[11px] gap-1">
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <span className="font-bold text-emerald-600">มา {comp.passedCount}</span>
-                                  {comp.alcCount > 0 && (
-                                    <span className="font-bold text-red-600">ALC {comp.alcCount}</span>
+                          const currentChunk = activeCompanies.slice(
+                            activeBubbleIdx * CHUNK_SIZE,
+                            (activeBubbleIdx + 1) * CHUNK_SIZE
+                          )
+
+                          return currentChunk.map((comp, idx) => {
+                            if (comp.projects && comp.projects.length > 1) {
+                              return (
+                                <div key={comp.companyName} className="space-y-1.5">
+                                  {/* Team Header */}
+                                  <div className="flex items-center justify-between gap-1 text-xs">
+                                    <span className="font-bold text-slate-900 truncate">
+                                      {comp.companyName}
+                                    </span>
+                                    <span className="text-[10px] font-bold text-blue-600 shrink-0">
+                                      แยก {comp.projects.length} โครงการ (มา {comp.passedCount})
+                                    </span>
+                                  </div>
+
+                                  {/* Sub-projects list */}
+                                  <div className="pl-2 border-l-2 border-slate-300 space-y-1.5 ml-1">
+                                    {comp.projects.map((proj, pIdx) => {
+                                      const alcTag = proj.alcCount > 0 ? ' (ALC)' : ''
+
+                                      return (
+                                        <div key={pIdx} className="space-y-0.5">
+                                          <div className="flex items-baseline justify-between gap-1 text-[11px]">
+                                            <span className="font-semibold text-blue-600 truncate">
+                                              {proj.activityTag || proj.activityName}
+                                            </span>
+                                            {proj.location && (
+                                              <span className="text-slate-500 text-[10px] shrink-0">
+                                                📍 {proj.location}
+                                              </span>
+                                            )}
+                                          </div>
+                                          <div className="flex items-center gap-2 text-[10px]">
+                                            <span className="font-bold text-emerald-600">✓ มา {proj.passedCount}</span>
+                                            {proj.failedCount > 0 && (
+                                              <span className="font-bold text-red-600">
+                                                ✕ ไม่ผ่าน {proj.failedCount}{alcTag}
+                                              </span>
+                                            )}
+                                            {proj.lateOrRequestsCount > 0 && (
+                                              <span className="text-blue-600 font-semibold">
+                                                ประสงค์ {proj.lateOrRequestsCount}
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+
+                                  {idx < currentChunk.length - 1 && (
+                                    <div className="border-b border-slate-100 pt-1.5" />
                                   )}
-                                  {comp.ppeFailedCount > 0 && (
-                                    <span className="font-bold text-red-600">ไม่ผ่าน {comp.ppeFailedCount}</span>
-                                  )}
-                                  <span className="text-slate-700">ไม่มา {comp.missingCount}</span>
-                                  {comp.lateOrRequests.length > 0 && (
-                                    <span className="text-blue-600 font-semibold">
-                                      แจ้งประสงค์ {comp.lateOrRequests.length}
+                                </div>
+                              )
+                            }
+
+                            // Single project
+                            const proj = comp.projects && comp.projects.length > 0 ? comp.projects[0] : null
+                            const actTag = proj?.activityTag || comp.activityTag || ''
+                            const loc = proj?.location || comp.location || ''
+
+                            const alcTag = comp.alcCount > 0 ? ' (ALC)' : ''
+
+                            return (
+                              <div key={comp.companyName} className="space-y-0.5">
+                                <div className="flex items-baseline justify-between gap-1 text-xs">
+                                  <span className="font-bold text-slate-900 truncate">
+                                    {comp.companyName}
+                                  </span>
+                                  {loc && (
+                                    <span className="text-slate-500 text-[10px] shrink-0">
+                                      📍 {loc}
                                     </span>
                                   )}
                                 </div>
-                                {comp.location && (
-                                  <span className="text-slate-600 text-[10px] shrink-0">
-                                    📍 {comp.location}
-                                  </span>
+
+                                {actTag && (
+                                  <div className="font-bold text-blue-600 text-[11px] leading-tight">
+                                    {actTag}
+                                  </div>
+                                )}
+
+                                <div className="flex items-center gap-2 text-[11px] pt-0.5">
+                                  <span className="font-bold text-emerald-600">✓ มา {comp.passedCount}</span>
+                                  {comp.failedCount > 0 && (
+                                    <span className="font-bold text-red-600">
+                                      ✕ ไม่ผ่าน {comp.failedCount}{alcTag}
+                                    </span>
+                                  )}
+                                  {comp.lateOrRequests.length > 0 && (
+                                    <span className="text-blue-600 font-semibold">
+                                      ประสงค์ {comp.lateOrRequests.length}
+                                    </span>
+                                  )}
+                                </div>
+
+                                {idx < currentChunk.length - 1 && (
+                                  <div className="border-b border-slate-100 pt-1.5" />
                                 )}
                               </div>
+                            )
+                          })
+                        })()}
 
-                              {idx < Math.min(report.companies.length, 12) - 1 && (
-                                <div className="border-b border-slate-100 pt-1.5" />
-                              )}
+                        {/* กล่องสรุปทีมที่ยังไม่มีคนเข้างาน (แสดงเฉพาะ Bubble สุดท้ายของสรุปการเข้างาน) */}
+                        {activeBubbleIdx === totalOverviewChunks - 1 &&
+                          report.inactiveCompanies &&
+                          report.inactiveCompanies.length > 0 && (
+                            <div className="bg-slate-50 border border-slate-100 rounded-md p-2 mt-2">
+                              <span className="text-[10px] font-bold text-slate-500 block">
+                                💤 ยังไม่มีคนเข้างาน ({report.inactiveCompanies.length} ทีม)
+                              </span>
+                              <span className="text-[9px] text-slate-400 block mt-0.5 leading-relaxed">
+                                {report.inactiveCompanies.slice(0, 8).map(c => c.companyName).join(', ')}
+                                {report.inactiveCompanies.length > 8 &&
+                                  ` ...และอีก ${report.inactiveCompanies.length - 8} ทีม`}
+                              </span>
                             </div>
-                          )
-                        })}
-
-                        {report.companies.length > 12 && (
-                          <div className="text-center text-[10px] text-slate-500 pt-1">
-                            ...และอีก {report.companies.length - 12} บริษัท
-                          </div>
-                        )}
+                          )}
                       </div>
                     </div>
 
@@ -1030,6 +1170,17 @@ export default function LineOAPage() {
                           placeholder={config.line_broadcast ? 'Broadcast ไปยังผู้ติดตามทุกคน' : 'เช่น U12345678... หรือ C12345678...'}
                           className="h-8 text-xs bg-white border-slate-300 font-mono disabled:opacity-50"
                         />
+                      </div>
+
+                      <div className="space-y-1 pt-1 border-t border-slate-200">
+                        <Label className="text-[11px] font-semibold text-slate-700">LINE LIFF ID (สำหรับเข้าใช้งานแอปผ่าน LINE)</Label>
+                        <Input
+                          value={config.line_liff_id || ''}
+                          onChange={e => setConfig(prev => ({ ...prev, line_liff_id: e.target.value }))}
+                          placeholder="เช่น 2006xxxxxx-xxxxxxxx"
+                          className="h-8 text-xs bg-white border-slate-300 font-mono"
+                        />
+                        <p className="text-[10px] text-slate-400">ตั้งค่า Endpoint URL ใน LINE Developers เป็น: <code>https://โดเมนของคุณ/checklist-m</code></p>
                       </div>
                     </div>
                   )}

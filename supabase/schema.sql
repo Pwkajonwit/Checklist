@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS public.companies (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL UNIQUE,
   code TEXT,
+  phone TEXT,
+  line_group TEXT,
   created_at TIMESTAMPTZ DEFAULT timezone('utc', now()) NOT NULL
 );
 
@@ -65,6 +67,7 @@ CREATE TABLE IF NOT EXISTS public.user_profiles (
   line_user_id TEXT UNIQUE,
   line_display_name TEXT,
   line_picture_url TEXT,
+  line_group TEXT,
   created_at TIMESTAMPTZ DEFAULT timezone('utc', now()) NOT NULL,
   updated_at TIMESTAMPTZ DEFAULT timezone('utc', now()) NOT NULL
 );
@@ -80,7 +83,8 @@ ALTER TABLE public.user_profiles
   ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT true NOT NULL,
   ADD COLUMN IF NOT EXISTS line_user_id TEXT UNIQUE,
   ADD COLUMN IF NOT EXISTS line_display_name TEXT,
-  ADD COLUMN IF NOT EXISTS line_picture_url TEXT;
+  ADD COLUMN IF NOT EXISTS line_picture_url TEXT,
+  ADD COLUMN IF NOT EXISTS line_group TEXT;
 
 -- ============================================================
 -- 5.1 TABLE: settings (การตั้งค่าระบบ - Dynamic JSONB)

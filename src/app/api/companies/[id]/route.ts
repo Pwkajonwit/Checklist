@@ -2,6 +2,8 @@ import { NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getSession } from '@/lib/session'
 
+import { formatCompanyCodePayload } from '@/lib/types'
+
 // PUT /api/companies/[id]
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession()
@@ -11,12 +13,28 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
   const body = await req.json()
   const supabase = createServiceClient()
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('companies')
     .update(body)
     .eq('id', id)
     .select()
     .single()
+
+  // Graceful fallback if phone or line_group columns are not yet added to DB
+  if (error && (error.code === 'PGRST204' || error.message?.includes('column'))) {
+    const fallbackBody = {
+      name: body.name,
+      code: formatCompanyCodePayload(body.code, body.phone, body.line_group),
+    }
+    const retry = await supabase
+      .from('companies')
+      .update(fallbackBody)
+      .eq('id', id)
+      .select()
+      .single()
+    data = retry.data
+    error = retry.error
+  }
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   return NextResponse.json({ data })

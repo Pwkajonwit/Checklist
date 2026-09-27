@@ -521,7 +521,7 @@ export default function ContractorsPage() {
                             <span>{c.phone}</span>
                           </a>
                         ) : (
-                          <span className="text-slate-400">-</span>
+                          <span className="text-slate-400 italic text-[11px]">—</span>
                         )}
                       </td>
 
@@ -697,13 +697,18 @@ export default function ContractorsPage() {
 
               {/* Phone */}
               <div className="space-y-1">
-                <Label className="text-xs font-semibold text-slate-700">เบอร์โทรศัพท์</Label>
+                <Label htmlFor="contractor_phone" className="text-xs font-semibold text-slate-700 flex items-center gap-1">
+                  <Phone className="w-3.5 h-3.5 text-amber-600" />
+                  เบอร์โทรศัพท์ / ติดต่อ
+                </Label>
                 <Input
+                  id="contractor_phone"
                   value={formData.phone}
                   onChange={e => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                   placeholder="เช่น 081-234-5678"
-                  className="h-8 text-xs bg-white border-slate-300 text-slate-900"
+                  className="h-8 text-xs bg-white border-slate-300 text-slate-900 font-mono"
                   type="tel"
+                  inputMode="tel"
                 />
               </div>
             </div>

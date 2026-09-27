@@ -51,6 +51,17 @@ export async function POST(req: Request) {
       )
     }
 
+    // เคลียร์ line_user_id เดิมออกจากโปรไฟล์อื่นหากมี เพื่อไม่ให้ LINE ID เดียวกันผูกซ้อนหลายบัญชี
+    await supabase
+      .from('user_profiles')
+      .update({
+        line_user_id: null,
+        line_display_name: null,
+        line_picture_url: null,
+      })
+      .eq('line_user_id', lineUserId)
+      .neq('id', profile.id)
+
     // ผูก LINE user id กับ profile
     const { error: updateError } = await supabase
       .from('user_profiles')

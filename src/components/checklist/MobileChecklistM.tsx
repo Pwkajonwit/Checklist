@@ -10,6 +10,9 @@ import {
   getContractorAlcRisk,
   getContractorDailyWage,
   cleanContractorPosition,
+  cleanCompanyCode,
+  getCompanyPhone,
+  getCompanyLineGroup,
   COMMON_TASK_PRESETS,
   PURPOSE_PRESETS,
   normalizeAlcForDb,
@@ -26,7 +29,7 @@ import {
   MapPin, Briefcase, User, Save, RefreshCw, Zap, ArrowLeft,
   Check, X, FileText, ChevronDown, Plus, Sparkles, Building2,
   Users, CheckCircle, MessageSquare, Phone, Monitor, RotateCcw,
-  Sliders
+  Sliders, Send
 } from 'lucide-react'
 import { PpeSettingsModal } from '@/components/checklist/PpeSettingsModal'
 import { extractUserNote } from '@/lib/utils'
@@ -73,6 +76,34 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
   const [entries, setEntries] = useState<ChecklistEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
+
+  // Users / Employees for Contact & LINE group lookup
+  const [users, setUsers] = useState<{
+    id: string
+    full_name?: string | null
+    phone?: string | null
+    role?: string
+    department?: string | null
+    line_group?: string | null
+  }[]>([])
+
+
+  // LINE Modal State
+  const [lineModalOpen, setLineModalOpen] = useState(false)
+  const [lineTargetCompany, setLineTargetCompany] = useState<{
+    name: string
+    code: string
+    phone?: string
+    lineGroup?: string
+    passedCount: number
+    totalCount: number
+    alcCount: number
+    ppeFailedCount: number
+    location?: string
+  } | null>(null)
+  const [lineTargetGroup, setLineTargetGroup] = useState('')
+  const [lineMessageText, setLineMessageText] = useState('')
+  const [lineSending, setLineSending] = useState(false)
 
   // Step 1: Selected Company
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
@@ -319,6 +350,12 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setContractors(cData ?? [])
       setCompanies(coData ?? [])
       setActivities(aData ?? [])
+
+      // Fetch users in parallel for employee phone & LINE group mapping
+      fetch('/api/admin/users')
+        .then(r => r.ok ? r.json() : { data: [] })
+        .then(j => { if (Array.isArray(j?.data)) setUsers(j.data) })
+        .catch(() => {})
     } catch (err: any) {
       console.error('Load mobile checklist data error:', err)
       toast.error('ไม่สามารถโหลดข้อมูลได้: ' + (err?.message || ''))
@@ -357,6 +394,8 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
     const map = new Map<string, {
       name: string
       code: string
+      phone: string
+      lineGroup: string
       location: string
       activityName: string
       members: Contractor[]
@@ -377,7 +416,9 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
           const compObj = companies.find(co => co.name === compName || co.code === compName)
           map.set(compName, {
             name: compName,
-            code: compObj?.code || '',
+            code: cleanCompanyCode(compObj?.code) || '',
+            phone: getCompanyPhone(compObj),
+            lineGroup: getCompanyLineGroup(compObj),
             location: '',
             activityName: '',
             members: [],
@@ -1067,6 +1108,52 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                             [{comp.code}]
                           </span>
                         )}
+
+                        {/* Call and LINE Quick Action Buttons */}
+                        <div className="flex items-center gap-1 ml-0.5" onClick={e => e.stopPropagation()}>
+                          {comp.phone ? (
+                            <a
+                              href={`tel:${comp.phone}`}
+                              className="w-7 h-7 rounded-full bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 flex items-center justify-center transition-all active:scale-90 shadow-2xs"
+                              title={`โทรหาสังกัด ${comp.name} (${comp.phone})`}
+                            >
+                              <Phone className="w-3.5 h-3.5 text-sky-600" />
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                toast.info(`สังกัด "${comp.name}" ยังไม่ได้ระบุเบอร์ติดต่อ (สามารถกรอกเบอร์ได้ที่แท็บ "แผนก/สังกัด")`)
+                              }}
+                              className="w-7 h-7 rounded-full bg-slate-100 text-slate-400 border border-slate-200 flex items-center justify-center transition-all active:scale-90"
+                              title={`สังกัด ${comp.name} ยังไม่มีเบอร์โทร`}
+                            >
+                              <Phone className="w-3.5 h-3.5 text-slate-400" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const matchedUser = users.find(u =>
+                                u.department && (
+                                  u.department.trim().toLowerCase() === comp.name.trim().toLowerCase() ||
+                                  (comp.code && u.department.toLowerCase().includes(comp.code.toLowerCase()))
+                                )
+                              )
+                              const targetGroup = comp.lineGroup || matchedUser?.line_group || ''
+                              setLineTargetCompany(comp)
+                              setLineTargetGroup(targetGroup)
+                              setLineMessageText(
+                                `📢 แจ้งเตือนทีม ${comp.name}${comp.code ? ` [${comp.code}]` : ''}: วันที่ ${format(new Date(date), 'dd/MM/yyyy')} มีผู้เข้าตรวจแล้ว ${comp.passedCount}/${comp.totalCount} คน กรุณาประสานงานให้พนักงานเข้าตรวจเช็คชื่อและสวมใส่อุปกรณ์ PPE ให้ครบถ้วน`
+                              )
+                              setLineModalOpen(true)
+                            }}
+                            className="w-7 h-7 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 flex items-center justify-center transition-all active:scale-90 shadow-2xs"
+                            title="เปิดฟอร์มส่งข้อความเข้ากลุ่ม LINE"
+                          >
+                            <MessageSquare className="w-3.5 h-3.5 text-[#06C755] fill-[#06C755]/20" />
+                          </button>
+                        </div>
                       </div>
                       <p className="text-xs text-slate-600 font-normal mt-0.5">
                         {comp.totalCount} คนงาน
@@ -1083,33 +1170,49 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                     </div>
                   </div>
 
-                  {/* Bottom Line: Summary stats (มา X  ALC Y  ไม่ผ่าน Z  ไม่มา W  แจ้งประสงค์ V) */}
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs flex-wrap gap-1">
-                    <div className="flex items-center gap-2 flex-wrap font-semibold">
-                      <span className="text-emerald-700">
-                        มา {comp.passedCount}
-                      </span>
-                      {comp.alcCount > 0 && (
-                        <span className="text-red-700">
-                          ALC {comp.alcCount}
+                  {/* Bottom Line: Concise, intuitive status pills */}
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {comp.passedCount === comp.totalCount && comp.totalCount > 0 ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold text-xs">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                          ผ่านครบ ({comp.totalCount})
                         </span>
-                      )}
-                      {comp.ppeFailedCount > 0 && (
-                        <span className="text-red-700">
-                          ไม่ผ่าน {comp.ppeFailedCount}
+                      ) : comp.passedCount === 0 && (comp.totalCount - comp.missingCount) === 0 ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 border border-slate-300 text-xs font-normal">
+                          ยังไม่ตรวจ ({comp.totalCount} คน)
                         </span>
-                      )}
-                      <span className="text-slate-700 font-normal">
-                        ไม่มา {comp.missingCount}
-                      </span>
-                      {comp.requestCount > 0 && (
-                        <span className="text-blue-800">
-                          แจ้งประสงค์ {comp.requestCount}
-                        </span>
+                      ) : (
+                        <>
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-300 font-semibold text-xs">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            ผ่าน {comp.passedCount}
+                          </span>
+
+                          {(comp.alcCount > 0 || comp.ppeFailedCount > 0) && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-rose-50 text-rose-800 border border-rose-300 font-semibold text-xs">
+                              <XCircle className="w-3 h-3 text-rose-600" />
+                              ไม่ผ่าน {Math.max(comp.alcCount, comp.ppeFailedCount, (comp.totalCount - comp.missingCount) - comp.passedCount)}
+                              {comp.alcCount > 0 && <span className="text-[10px] text-rose-900 font-bold">(ALC)</span>}
+                            </span>
+                          )}
+
+                          {comp.missingCount > 0 && (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-300 text-xs font-normal">
+                              รอ {comp.missingCount}
+                            </span>
+                          )}
+
+                          {comp.requestCount > 0 && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-blue-50 text-blue-800 border border-blue-200 text-[11px] font-normal" title="มีผู้แจ้งประสงค์ขอเข้า">
+                              ขอเข้า {comp.requestCount}
+                            </span>
+                          )}
+                        </>
                       )}
                     </div>
 
-                    <ChevronRight className="w-4 h-4 text-slate-500 shrink-0" />
+                    <ChevronRight className="w-4 h-4 text-slate-400 shrink-0" />
                   </div>
                 </div>
               ))
@@ -1147,6 +1250,52 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
             </div>
 
             <div className="flex items-center gap-1.5">
+              {currentCompanySummary && (
+                <>
+                  {currentCompanySummary.phone ? (
+                    <a
+                      href={`tel:${currentCompanySummary.phone}`}
+                      className="w-8 h-8 rounded-full bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 flex items-center justify-center border border-sky-400/30 transition-all active:scale-95"
+                      title={`โทรหาสังกัด ${selectedCompany} (${currentCompanySummary.phone})`}
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                    </a>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        toast.info(`สังกัด "${selectedCompany}" ยังไม่ได้ระบุเบอร์ติดต่อ (สามารถกรอกเบอร์ได้ที่แท็บ "แผนก/สังกัด")`)
+                      }}
+                      className="w-8 h-8 rounded-full bg-white/10 text-slate-400 flex items-center justify-center border border-white/20 transition-all active:scale-95"
+                      title={`สังกัด ${selectedCompany} ยังไม่มีเบอร์โทร`}
+                    >
+                      <Phone className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const matchedUser = users.find(u =>
+                        u.department && (
+                          u.department.trim().toLowerCase() === currentCompanySummary.name.trim().toLowerCase() ||
+                          (currentCompanySummary.code && u.department.toLowerCase().includes(currentCompanySummary.code.toLowerCase()))
+                        )
+                      )
+                      const targetGroup = currentCompanySummary.lineGroup || matchedUser?.line_group || ''
+                      setLineTargetCompany(currentCompanySummary)
+                      setLineTargetGroup(targetGroup)
+                      setLineMessageText(
+                        `📢 แจ้งเตือนทีม ${currentCompanySummary.name}${currentCompanySummary.code ? ` [${currentCompanySummary.code}]` : ''}: วันที่ ${format(new Date(date), 'dd/MM/yyyy')} มีผู้เข้าตรวจแล้ว ${currentCompanySummary.passedCount}/${currentCompanySummary.totalCount} คน กรุณาประสานงานให้เข้าตรวจเช็คชื่อให้ครบถ้วน`
+                      )
+                      setLineModalOpen(true)
+                    }}
+                    className="w-8 h-8 rounded-full bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 flex items-center justify-center border border-emerald-400/30 transition-all active:scale-95"
+                    title={`ส่ง LINE เข้ากลุ่ม ${selectedCompany}`}
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-[#06C755]" />
+                  </button>
+                </>
+              )}
               {isAdmin && (
                 <button
                   type="button"
@@ -1366,6 +1515,30 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                               เสี่ยง ALC
                             </span>
                           )}
+
+                          {/* Call contractor button */}
+                          {member.phone ? (
+                            <a
+                              href={`tel:${member.phone}`}
+                              onClick={e => e.stopPropagation()}
+                              className="w-6 h-6 rounded-full bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 flex items-center justify-center transition-all active:scale-90 shadow-2xs shrink-0"
+                              title={`โทรหา ${member.name} (${member.phone})`}
+                            >
+                              <Phone className="w-3 h-3 text-sky-600" />
+                            </a>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={e => {
+                                e.stopPropagation()
+                                toast.info(`ช่าง ${member.name} ยังไม่มีเบอร์โทรในระบบ`)
+                              }}
+                              className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 border border-slate-200 flex items-center justify-center transition-all active:scale-90 shrink-0"
+                              title="ไม่มีเบอร์โทรในระบบ"
+                            >
+                              <Phone className="w-3 h-3 text-slate-400" />
+                            </button>
+                          )}
                         </div>
 
                         {/* Status detail */}
@@ -1414,7 +1587,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                           type="button"
                           onClick={e => handleCancelEntry(member, entry, e)}
                           disabled={deletingId === entry.id}
-                          className="h-8 px-2.5 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-700 text-xs font-semibold flex items-center gap-1 border border-rose-300 transition-all"
+                          className="w-8 h-8 rounded-lg bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-700 flex items-center justify-center border border-rose-300 transition-all shrink-0"
                           title="ยกเลิกการตรวจ คืนสถานะเป็นยังไม่ตรวจ"
                         >
                           {deletingId === entry.id ? (
@@ -1422,7 +1595,6 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                           ) : (
                             <RotateCcw className="w-3.5 h-3.5 text-rose-600" />
                           )}
-                          <span>ยกเลิก</span>
                         </button>
                       )}
 
@@ -1512,10 +1684,14 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                       if (ent) handleCancelEntry(selectedContractor, ent)
                     }}
                     disabled={deletingId === getEntryForContractor(selectedContractor)?.id}
-                    className="text-xs text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-300 px-2.5 py-1 rounded-lg font-semibold flex items-center gap-1 transition-colors"
+                    className="w-8 h-8 rounded-lg text-rose-700 hover:text-rose-800 bg-rose-50 hover:bg-rose-100 border border-rose-300 flex items-center justify-center transition-colors shadow-2xs"
+                    title="ยกเลิกการตรวจ คืนสถานะเป็นยังไม่ตรวจ"
                   >
-                    <RotateCcw className="w-3.5 h-3.5" />
-                    <span>ยกเลิกการตรวจคนนี้</span>
+                    {deletingId === getEntryForContractor(selectedContractor)?.id ? (
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    ) : (
+                      <RotateCcw className="w-3.5 h-3.5" />
+                    )}
                   </button>
                 </div>
               )}
@@ -2216,6 +2392,191 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
           toast.success('อัปเดตรายการเช็คลิสต์เรียบร้อย')
         }}
       />
+
+
+
+      {/* ──────────────────────────────────────────────────────────────────────────
+          LINE MODAL: เปิดฟอร์มพิมพ์ข้อความส่งไปยัง Linegroup ของพนักงาน
+      ────────────────────────────────────────────────────────────────────────── */}
+      {lineModalOpen && lineTargetCompany && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-end sm:items-center justify-center p-0 sm:p-4">
+          <div className="w-full max-w-md bg-white rounded-t-2xl sm:rounded-2xl max-h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in slide-in-from-bottom duration-200">
+            {/* Modal Header */}
+            <div className="p-3.5 bg-gradient-to-r from-emerald-950 via-slate-900 to-emerald-950 text-white flex items-center justify-between border-b border-emerald-900/40 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-[#06C755] flex items-center justify-center text-white shadow-sm shrink-0">
+                  <MessageSquare className="w-4 h-4 fill-white" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-white leading-tight">
+                    ส่งข้อความเข้ากลุ่ม LINE
+                  </h3>
+                  <p className="text-[11px] text-emerald-200 font-normal mt-0.5">
+                    สังกัด: {lineTargetCompany.name} {lineTargetCompany.code ? `[${lineTargetCompany.code}]` : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setLineModalOpen(false)}
+                className="w-8 h-8 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-3.5 space-y-3 overflow-y-auto max-h-[65vh]">
+              {/* LINE Group Target Field */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>กลุ่ม LINE (Line Group)</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    {lineTargetGroup ? 'ตรวจพบกลุ่มของสังกัด' : 'เว้นว่างเพื่อส่งกลุ่มหลัก'}
+                  </span>
+                </label>
+                <input
+                  type="text"
+                  value={lineTargetGroup}
+                  onChange={e => setLineTargetGroup(e.target.value)}
+                  placeholder="เช่น ทีมช่างอาคาร A หรือระบุ Group ID"
+                  className="w-full h-8 px-2.5 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 font-medium focus:ring-1 focus:ring-emerald-500 focus:outline-none"
+                />
+              </div>
+
+              {/* Message Textarea */}
+              <div className="space-y-1">
+                <label className="text-xs font-semibold text-slate-700 flex items-center justify-between">
+                  <span>ข้อความแจ้งเตือน *</span>
+                  <span className="text-[10px] text-slate-400 font-normal">
+                    {lineMessageText.length} ตัวอักษร
+                  </span>
+                </label>
+                <textarea
+                  value={lineMessageText}
+                  onChange={e => setLineMessageText(e.target.value)}
+                  rows={4}
+                  placeholder="พิมพ์ข้อความที่ต้องการส่งเข้ากลุ่ม LINE..."
+                  className="w-full p-2.5 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 font-normal focus:ring-1 focus:ring-emerald-500 focus:outline-none resize-none leading-relaxed"
+                />
+              </div>
+
+              {/* Quick Template Chips */}
+              <div className="space-y-1.5">
+                <p className="text-[11px] font-semibold text-slate-600">
+                  ข้อความด่วน (คลิกเพื่อเปลี่ยนข้อความ):
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLineMessageText(
+                        `🔔 [แจ้งเตือนด่วน] ขอให้ทีม ${lineTargetCompany.name} ส่งพนักงานเข้าตรวจเช็คชื่อความปลอดภัยหน้างานทันที`
+                      )
+                    }
+                    className="text-[10px] px-2 py-1 rounded-md bg-amber-50 text-amber-900 border border-amber-200 hover:bg-amber-100 transition-colors font-medium flex items-center gap-1 active:scale-95"
+                  >
+                    <span>🔔 ตามเข้าตรวจเช็คชื่อ</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLineMessageText(
+                        `🦺 [เตือนความปลอดภัย] สังกัด ${lineTargetCompany.name} กรุณาตรวจสอบให้พนักงานทุกคนสวมหมวก กั๊ก แว่น ถุงมือ และรองเท้านิรภัยให้ครบถ้วนก่อนเข้าปฏิบัติงาน`
+                      )
+                    }
+                    className="text-[10px] px-2 py-1 rounded-md bg-blue-50 text-blue-900 border border-blue-200 hover:bg-blue-100 transition-colors font-medium flex items-center gap-1 active:scale-95"
+                  >
+                    <span>🦺 เตือนสวม PPE ให้ครบ</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLineMessageText(
+                        `⚠️ [แจ้งผลตรวจแอลกอฮอล์] สังกัด ${lineTargetCompany.name} พบพนักงานผลตรวจแอลกอฮอล์ไม่ผ่าน กรุณาประสานงานติดต่อหัวหน้างานหรือ จป. หน้างานทันที`
+                      )
+                    }
+                    className="text-[10px] px-2 py-1 rounded-md bg-red-50 text-red-900 border border-red-200 hover:bg-red-100 transition-colors font-medium flex items-center gap-1 active:scale-95"
+                  >
+                    <span>⚠️ ผล ALC ไม่ผ่าน</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLineMessageText(
+                        `📊 [สรุปยอดตรวจหน้างาน] ${lineTargetCompany.name} (${format(new Date(date), 'dd/MM/yyyy')}): ยอดช่างทั้งหมด ${lineTargetCompany.totalCount} คน | ตรวจผ่าน ${lineTargetCompany.passedCount} คน | ไม่ผ่าน ${lineTargetCompany.ppeFailedCount + lineTargetCompany.alcCount} คน`
+                      )
+                    }
+                    className="text-[10px] px-2 py-1 rounded-md bg-emerald-50 text-emerald-900 border border-emerald-200 hover:bg-emerald-100 transition-colors font-medium flex items-center gap-1 active:scale-95"
+                  >
+                    <span>📊 สรุปยอดเข้างาน</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-3 bg-slate-50 border-t border-slate-200 shrink-0 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setLineModalOpen(false)}
+                disabled={lineSending}
+                className="h-10 rounded-xl border border-slate-300 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-100"
+              >
+                ยกเลิก
+              </button>
+              <button
+                type="button"
+                disabled={lineSending || !lineMessageText.trim()}
+                onClick={async () => {
+                  if (!lineMessageText.trim()) return
+                  setLineSending(true)
+                  try {
+                    const res = await fetch('/api/line/send', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({
+                        message: lineMessageText.trim(),
+                        line_target_id: lineTargetGroup.trim() || undefined,
+                      }),
+                    })
+                    const data = await res.json()
+                    if (!res.ok) {
+                      throw new Error(data.error || 'ส่งข้อความไม่สำเร็จ')
+                    }
+                    toast.success('ส่งข้อความเข้ากลุ่ม LINE เรียบร้อยแล้ว')
+                    setLineModalOpen(false)
+                  } catch (err: any) {
+                    console.error('Send LINE message error:', err)
+                    toast.error(err.message || 'ส่งข้อความไม่สำเร็จ กรุณาตรวจสอบการตั้งค่า LINE')
+                  } finally {
+                    setLineSending(false)
+                  }
+                }}
+                className="h-10 rounded-xl bg-[#06C755] hover:bg-[#05b34c] text-white text-xs font-bold flex items-center justify-center gap-1.5 shadow-md disabled:opacity-50 active:scale-95"
+              >
+                {lineSending ? (
+                  <>
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>กำลังส่ง...</span>
+                  </>
+                ) : (
+                  <>
+                    <Send className="w-4 h-4" />
+                    <span>ส่งเข้ากลุ่ม LINE</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   )

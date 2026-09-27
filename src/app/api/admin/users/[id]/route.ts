@@ -18,6 +18,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     email: body.email || null,
     role: body.role,
     department: body.department || null,
+    line_group: body.line_group || null,
     phone: body.phone || null,
     is_active: body.is_active ?? true,
     updated_at: new Date().toISOString(),
@@ -30,20 +31,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
     .select()
     .single()
 
-  // กรณีฐานข้อมูลยังไม่มีคอลัมน์ phone/department/is_active
+  // กรณีฐานข้อมูลยังไม่มีคอลัมน์ phone/department/line_group/is_active
   if (error && error.message.includes('column')) {
-    const basicPayload: any = {
-      full_name: body.full_name,
-      role: body.role,
-      updated_at: new Date().toISOString(),
+    const { line_group, ...fallbackWithoutGroup } = updatePayload
+    let res = await supabase.from('user_profiles').update(fallbackWithoutGroup).eq('id', id).select().single()
+    if (res.error && res.error.message.includes('column')) {
+      const basicPayload: any = {
+        full_name: body.full_name,
+        role: body.role,
+        updated_at: new Date().toISOString(),
+      }
+      if (body.phone) {
+        basicPayload.email = `${body.phone}@phone.auth`
+      } else if (body.email) {
+        basicPayload.email = body.email
+      }
+      res = await supabase.from('user_profiles').update(basicPayload).eq('id', id).select().single()
     }
-    if (body.phone) {
-      basicPayload.email = `${body.phone}@phone.auth`
-    } else if (body.email) {
-      basicPayload.email = body.email
-    }
-    const res = await supabase.from('user_profiles').update(basicPayload).eq('id', id).select().single()
-    data = res.data ? { ...res.data, phone: body.phone, department: body.department, is_active: body.is_active ?? true } : null
+    data = res.data ? { ...res.data, phone: body.phone, department: body.department, line_group: body.line_group, is_active: body.is_active ?? true } : null
     error = res.error
   }
 

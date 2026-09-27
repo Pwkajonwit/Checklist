@@ -13,6 +13,60 @@ export interface MemberStatusDetail {
   failReason?: string | null
 }
 
+export interface CompanyProjectGroup {
+  activityId?: string | null
+  activityName: string
+  activityCode?: string | null
+  activityTag?: string | null
+  location?: string | null
+  checkedInCount: number
+  passedCount: number
+  failedCount: number
+  alcCount: number
+  ppeFailedCount: number
+  lateOrRequestsCount: number
+  lateOrRequests: {
+    name: string
+    purpose: string
+    checkInTime?: string | null
+    location?: string | null
+    companyCode?: string | null
+  }[]
+  failedMembers: { name: string; reason: string; checkInTime?: string | null }[]
+  checkedInMembers: { name: string; checkInTime?: string | null }[]
+  membersDetails: MemberStatusDetail[]
+}
+
+export interface ActiveProjectRow {
+  companyName: string
+  companyCode?: string | null
+  activityId?: string | null
+  activityName: string
+  activityCode?: string | null
+  activityTag?: string | null
+  location?: string | null
+  checkedInCount: number
+  passedCount: number
+  failedCount: number
+  alcCount: number
+  ppeFailedCount: number
+  lateOrRequestsCount: number
+  lateOrRequests: {
+    name: string
+    purpose: string
+    checkInTime?: string | null
+    location?: string | null
+    companyCode?: string | null
+  }[]
+  failedMembers: { name: string; reason: string; checkInTime?: string | null }[]
+}
+
+export interface InactiveCompanySummary {
+  companyName: string
+  companyCode?: string | null
+  totalRegistered: number
+}
+
 export interface CompanySummary {
   companyName: string
   companyCode?: string | null
@@ -38,6 +92,7 @@ export interface CompanySummary {
   missingMembers: string[]
   checkedInMembers: { name: string; checkInTime?: string | null }[]
   membersDetails: MemberStatusDetail[]
+  projects: CompanyProjectGroup[]
 }
 
 export interface DailyReportData {
@@ -50,10 +105,12 @@ export interface DailyReportData {
   totalPpeFailed: number
   totalMissing: number
   companies: CompanySummary[]
+  activeProjectRows: ActiveProjectRow[]
+  inactiveCompanies: InactiveCompanySummary[]
 }
 
 /**
- * คำนวณสรุปข้อมูล Checklist ประจำวัน แยกตามสาขา / บริษัท
+ * คำนวณสรุปข้อมูล Checklist ประจำวัน แยกตามสาขา / บริษัท และแยกตามโครงการที่ลงทะเบียนปฏิบัติงาน
  */
 export function buildDailyReportData(
   dateStr: string,
@@ -93,46 +150,30 @@ export function buildDailyReportData(
     totalRegistered += regCount
 
     const compObj = companies.find(c => c.name === compName || (c.code && c.code === compName))
-    const compEntries = dateEntries.filter(
-      e => e.company_name === compName || members.some(m => m.id === e.contractor_id || m.name === e.contractor_name)
-    )
-    const location = compEntries.find(e => e.location && e.location.trim())?.location?.trim() || ''
-
-    // ดึงชื่อกิจกรรมและรหัส (ทั้งรหัสกิจกรรม และรหัสสังกัด/บริษัท)
-    const rawActivityName = compEntries.find(e => e.activity_name && e.activity_name.trim())?.activity_name?.trim() || ''
-    const rawActivityId = compEntries.find(e => e.activity_id)?.activity_id
-    const actObj = activities.find(a => (rawActivityId && a.id === rawActivityId) || (rawActivityName && a.name === rawActivityName))
-
-    const actCode = actObj?.code ? actObj.code.trim() : ''
     const compCode = compObj?.code ? compObj.code.trim() : ''
-    const code = actCode || compCode
-    const actName = rawActivityName || actObj?.name || ''
 
-    let activityTag = ''
-    if (actName && code) {
-      activityTag = `[${code}] ${actName}`
-    } else if (actName) {
-      activityTag = actName
-    } else if (code) {
-      activityTag = `[${code}]`
-    }
+    // จัดกลุ่มพนักงานที่เข้างานตามโครงการ (activity + location)
+    const projectMap = new Map<
+      string,
+      {
+        activityId?: string | null
+        activityName: string
+        location: string
+        membersWithEntry: { m: Contractor; entry: ChecklistEntry }[]
+      }
+    >()
 
-    const checkedIn: { name: string; checkInTime?: string | null }[] = []
-    const lateOrReqs: {
+    const missingList: string[] = []
+    const allMembersDetails: MemberStatusDetail[] = []
+    const allCheckedIn: { name: string; checkInTime?: string | null }[] = []
+    const allLateOrReqs: {
       name: string
       purpose: string
       checkInTime?: string | null
       location?: string | null
       companyCode?: string | null
     }[] = []
-    const failedList: { name: string; reason: string; checkInTime?: string | null }[] = []
-    const missingList: string[] = []
-    const membersDetails: MemberStatusDetail[] = []
-
-    let passedInComp = 0
-    let failedInComp = 0
-    let alcFailedInComp = 0
-    let ppeFailedInComp = 0
+    const allFailedList: { name: string; reason: string; checkInTime?: string | null }[] = []
 
     members.forEach(m => {
       const entry = dateEntries.find(
@@ -141,20 +182,89 @@ export function buildDailyReportData(
 
       if (entry) {
         const timeStr = entry.check_in_time ? entry.check_in_time.substring(0, 5) : null
-        checkedIn.push({ name: m.name, checkInTime: timeStr })
+        allCheckedIn.push({ name: m.name, checkInTime: timeStr })
 
-        // Check if has special purpose or late request
+        const actId = entry.activity_id || null
+        const actName = entry.activity_name?.trim() || ''
+        const loc = entry.location?.trim() || ''
+        const projKey = `${actId || ''}:::${actName}:::${loc}`
+
+        if (!projectMap.has(projKey)) {
+          projectMap.set(projKey, {
+            activityId: actId,
+            activityName: actName,
+            location: loc,
+            membersWithEntry: [],
+          })
+        }
+        projectMap.get(projKey)!.membersWithEntry.push({ m, entry })
+      } else {
+        missingList.push(m.name)
+        allMembersDetails.push({
+          name: m.name,
+          position: m.position || undefined,
+          status: 'missing',
+        })
+      }
+    })
+
+    const compCheckedCount = allCheckedIn.length
+    const compMissingCount = regCount - compCheckedCount
+
+    // ประมวลผลรายละเอียดแต่ละโครงการย่อยภายใต้ทีมนี้
+    const projectGroups: CompanyProjectGroup[] = []
+
+    projectMap.forEach(projData => {
+      const actObj = activities.find(
+        a =>
+          (projData.activityId && a.id === projData.activityId) ||
+          (projData.activityName && a.name === projData.activityName)
+      )
+      const actCode = actObj?.code ? actObj.code.trim() : ''
+      const code = actCode || compCode
+      const finalActName = projData.activityName || actObj?.name || compName
+      const finalLocation = projData.location || actObj?.location?.trim() || ''
+
+      let activityTag = ''
+      if (finalActName && code) {
+        activityTag = `[${code}] ${finalActName}`
+      } else if (finalActName) {
+        activityTag = finalActName
+      } else if (code) {
+        activityTag = `[${code}]`
+      }
+
+      let projPassed = 0
+      let projFailed = 0
+      let projAlcFailed = 0
+      let projPpeFailed = 0
+      const projCheckedIn: { name: string; checkInTime?: string | null }[] = []
+      const projLateOrReqs: {
+        name: string
+        purpose: string
+        checkInTime?: string | null
+        location?: string | null
+        companyCode?: string | null
+      }[] = []
+      const projFailedList: { name: string; reason: string; checkInTime?: string | null }[] = []
+      const projMembersDetails: MemberStatusDetail[] = []
+
+      projData.membersWithEntry.forEach(({ m, entry }) => {
+        const timeStr = entry.check_in_time ? entry.check_in_time.substring(0, 5) : null
+        projCheckedIn.push({ name: m.name, checkInTime: timeStr })
+
         if (entry.purpose && entry.purpose.trim()) {
-          lateOrReqs.push({
+          const reqItem = {
             name: m.name,
             purpose: entry.purpose.trim(),
             checkInTime: timeStr,
-            location: entry.location?.trim() || location || '',
-            companyCode: compCode,
-          })
+            location: finalLocation || null,
+            companyCode: compCode || null,
+          }
+          projLateOrReqs.push(reqItem)
+          allLateOrReqs.push(reqItem)
         }
 
-        // Check if passed ALC and PPE
         const isAlcPass = isAlcoholPassed(entry.alc_result)
         const isPpePass =
           entry.ppe_helmet &&
@@ -164,19 +274,21 @@ export function buildDailyReportData(
           entry.ppe_shoes
 
         if (isAlcPass && isPpePass) {
-          passedInComp += 1
-          membersDetails.push({
+          projPassed += 1
+          const memDetail: MemberStatusDetail = {
             name: m.name,
             position: m.position || undefined,
             status: 'passed',
             checkInTime: timeStr,
             purpose: entry.purpose || undefined,
             alcResult: entry.alc_result,
-          })
+          }
+          projMembersDetails.push(memDetail)
+          allMembersDetails.push(memDetail)
         } else {
-          failedInComp += 1
-          if (!isAlcPass) alcFailedInComp += 1
-          if (!isPpePass) ppeFailedInComp += 1
+          projFailed += 1
+          if (!isAlcPass) projAlcFailed += 1
+          if (!isPpePass) projPpeFailed += 1
 
           const reasons: string[] = []
           if (!isAlcPass) reasons.push(`ALC ${entry.alc_result}`)
@@ -190,8 +302,11 @@ export function buildDailyReportData(
             reasons.push(`ขาด ${missingPpe.join('/')}`)
           }
           const failReason = reasons.join(', ')
-          failedList.push({ name: m.name, reason: failReason, checkInTime: timeStr })
-          membersDetails.push({
+          const failItem = { name: m.name, reason: failReason, checkInTime: timeStr }
+          projFailedList.push(failItem)
+          allFailedList.push(failItem)
+
+          const memDetail: MemberStatusDetail = {
             name: m.name,
             position: m.position || undefined,
             status: 'failed',
@@ -199,48 +314,112 @@ export function buildDailyReportData(
             purpose: entry.purpose || undefined,
             alcResult: entry.alc_result,
             failReason,
-          })
+          }
+          projMembersDetails.push(memDetail)
+          allMembersDetails.push(memDetail)
         }
-      } else {
-        missingList.push(m.name)
-        membersDetails.push({
-          name: m.name,
-          position: m.position || undefined,
-          status: 'missing',
-        })
-      }
+      })
+
+      projectGroups.push({
+        activityId: projData.activityId,
+        activityName: finalActName,
+        activityCode: code || null,
+        activityTag: activityTag || null,
+        location: finalLocation || null,
+        checkedInCount: projCheckedIn.length,
+        passedCount: projPassed,
+        failedCount: projFailed,
+        alcCount: projAlcFailed,
+        ppeFailedCount: projPpeFailed,
+        lateOrRequestsCount: projLateOrReqs.length,
+        lateOrRequests: projLateOrReqs,
+        failedMembers: projFailedList,
+        checkedInMembers: projCheckedIn,
+        membersDetails: projMembersDetails,
+      })
     })
 
-    const checkedCount = checkedIn.length
-    const missingCount = regCount - checkedCount
+    const compPassed = projectGroups.reduce((sum, p) => sum + p.passedCount, 0)
+    const compFailed = projectGroups.reduce((sum, p) => sum + p.failedCount, 0)
+    const compAlcFailed = projectGroups.reduce((sum, p) => sum + p.alcCount, 0)
+    const compPpeFailed = projectGroups.reduce((sum, p) => sum + p.ppeFailedCount, 0)
 
-    totalCheckedIn += checkedCount
-    totalPassed += passedInComp
-    totalFailed += failedInComp
-    totalAlcFailed += alcFailedInComp
-    totalPpeFailed += ppeFailedInComp
-    totalMissing += missingCount
+    totalCheckedIn += compCheckedCount
+    totalPassed += compPassed
+    totalFailed += compFailed
+    totalAlcFailed += compAlcFailed
+    totalPpeFailed += compPpeFailed
+    totalMissing += compMissingCount
+
+    const primaryProj = projectGroups[0]
+    const compActivityTag = primaryProj?.activityTag || (compCode ? `[${compCode}]` : null)
+    const compLocation = primaryProj?.location || null
+    const compActivityName = primaryProj?.activityName || null
+    const compActivityCode = primaryProj?.activityCode || (compCode || null)
 
     companySummaries.push({
       companyName: compName,
       companyCode: compCode || null,
-      activityName: actName || null,
-      activityCode: code || null,
-      activityTag: activityTag || null,
-      location: location || null,
+      activityName: compActivityName,
+      activityCode: compActivityCode,
+      activityTag: compActivityTag,
+      location: compLocation,
       totalRegistered: regCount,
-      checkedInCount: checkedCount,
-      passedCount: passedInComp,
-      failedCount: failedInComp,
-      alcCount: alcFailedInComp,
-      ppeFailedCount: ppeFailedInComp,
-      missingCount: missingCount,
-      lateOrRequests: lateOrReqs,
-      failedMembers: failedList,
+      checkedInCount: compCheckedCount,
+      passedCount: compPassed,
+      failedCount: compFailed,
+      alcCount: compAlcFailed,
+      ppeFailedCount: compPpeFailed,
+      missingCount: compMissingCount,
+      lateOrRequests: allLateOrReqs,
+      failedMembers: allFailedList,
       missingMembers: missingList,
-      checkedInMembers: checkedIn,
-      membersDetails,
+      checkedInMembers: allCheckedIn,
+      membersDetails: allMembersDetails,
+      projects: projectGroups,
     })
+  })
+
+  // เรียงลำดับ: ทีมที่เข้างานจริงขึ้นก่อน ตามด้วยทีมที่ไม่มา
+  companySummaries.sort((a, b) => {
+    if (b.checkedInCount !== a.checkedInCount) {
+      return b.checkedInCount - a.checkedInCount
+    }
+    return a.companyName.localeCompare(b.companyName)
+  })
+
+  // แตกรายการกลุ่มงานที่ปฏิบัติจริง (Active Project Rows) และสรุปทีมที่ไม่มา (Inactive Companies)
+  const activeProjectRows: ActiveProjectRow[] = []
+  const inactiveCompanies: InactiveCompanySummary[] = []
+
+  companySummaries.forEach(comp => {
+    if (comp.checkedInCount > 0 && comp.projects && comp.projects.length > 0) {
+      comp.projects.forEach(proj => {
+        activeProjectRows.push({
+          companyName: comp.companyName,
+          companyCode: comp.companyCode,
+          activityId: proj.activityId,
+          activityName: proj.activityName,
+          activityCode: proj.activityCode,
+          activityTag: proj.activityTag,
+          location: proj.location,
+          checkedInCount: proj.checkedInCount,
+          passedCount: proj.passedCount,
+          failedCount: proj.failedCount,
+          alcCount: proj.alcCount,
+          ppeFailedCount: proj.ppeFailedCount,
+          lateOrRequestsCount: proj.lateOrRequestsCount,
+          lateOrRequests: proj.lateOrRequests,
+          failedMembers: proj.failedMembers,
+        })
+      })
+    } else {
+      inactiveCompanies.push({
+        companyName: comp.companyName,
+        companyCode: comp.companyCode,
+        totalRegistered: comp.totalRegistered,
+      })
+    }
   })
 
   return {
@@ -252,7 +431,9 @@ export function buildDailyReportData(
     totalAlcFailed,
     totalPpeFailed,
     totalMissing,
-    companies: companySummaries.sort((a, b) => b.checkedInCount - a.checkedInCount),
+    companies: companySummaries,
+    activeProjectRows,
+    inactiveCompanies,
   }
 }
 
@@ -274,33 +455,56 @@ export function formatDailyLineMessage(report: DailyReportData): string {
   lines.push(`ทีมงานรวม ${report.totalPassed} | ไม่มา ${report.totalMissing} | ประสงค์ ${totalRequests}`)
   lines.push(`────────────────`)
 
-  // 1. สรุปรายบริษัท
-  report.companies.forEach(comp => {
-    let actTag = comp.activityTag || ''
-    if (!actTag) {
-      if (comp.activityName && comp.companyCode) {
-        actTag = `[${comp.companyCode}] ${comp.activityName}`
-      } else if (comp.activityName) {
-        actTag = comp.activityName
-      } else if (comp.companyCode) {
-        actTag = `[${comp.companyCode}]`
-      }
-    }
-    const actStr = actTag ? `  ${actTag}` : ''
-    const locStr = comp.location ? `  📍 ${comp.location}` : ''
-    
-    const stats: string[] = [`มา ${comp.passedCount}`]
-    if (comp.alcCount > 0) stats.push(`ALC ${comp.alcCount}`)
-    if (comp.ppeFailedCount > 0) stats.push(`ไม่ผ่าน ${comp.ppeFailedCount}`)
-    stats.push(`ไม่มา ${comp.missingCount}`)
-    if (comp.lateOrRequests.length > 0) stats.push(`แจ้งประสงค์ ${comp.lateOrRequests.length}`)
+  // 1. สรุปรายทีมที่ปฏิบัติงานจริง
+  const activeCompanies = (report.companies || []).filter(c => c.checkedInCount > 0)
 
-    lines.push(`🏢 ${comp.companyName}${actStr}`)
-    lines.push(`   ${stats.join('  ')}${locStr}`)
-  })
+  if (activeCompanies.length > 0) {
+    activeCompanies.forEach(comp => {
+      if (comp.projects && comp.projects.length > 1) {
+        lines.push(`🏢 ${comp.companyName} (แยก ${comp.projects.length} โครงการ • มา ${comp.passedCount} คน)`)
+        comp.projects.forEach(proj => {
+          const actStr = proj.activityTag ? ` ${proj.activityTag}` : ''
+          const locStr = proj.location ? ` [📍 ${proj.location}]` : ''
+          const stats: string[] = [`✓ มา ${proj.passedCount} คน`]
+          if (proj.failedCount > 0) {
+            const alcTag = proj.alcCount > 0 ? ' (ALC)' : ''
+            stats.push(`⚠️ ไม่ผ่าน ${proj.failedCount} คน${alcTag}`)
+          }
+          if (proj.lateOrRequestsCount > 0) {
+            stats.push(`📝 ประสงค์ ${proj.lateOrRequestsCount} คน`)
+          }
+          lines.push(`   •${actStr}${locStr} : ${stats.join(' | ')}`)
+        })
+      } else {
+        const proj = comp.projects && comp.projects.length > 0 ? comp.projects[0] : null
+        const actStr = proj?.activityTag || comp.activityTag ? `\n   🏗️ ${proj?.activityTag || comp.activityTag}` : ''
+        const locStr = (proj?.location || comp.location) ? ` (📍 ${proj?.location || comp.location})` : ''
+        const stats: string[] = [`✓ มา ${comp.passedCount} คน`]
+        if (comp.failedCount > 0) {
+          const alcTag = comp.alcCount > 0 ? ' (ALC)' : ''
+          stats.push(`⚠️ ไม่ผ่าน ${comp.failedCount} คน${alcTag}`)
+        }
+        if (comp.lateOrRequests.length > 0) {
+          stats.push(`📝 ประสงค์ ${comp.lateOrRequests.length} คน`)
+        }
+        lines.push(`🏢 ${comp.companyName}${locStr}${actStr}`)
+        lines.push(`   ${stats.join(' | ')}`)
+      }
+    })
+  } else {
+    lines.push(`⏳ ยังไม่มีข้อมูลการเข้างานในวันนี้`)
+  }
   lines.push(`────────────────`)
 
-  // 2. รายการแจ้งความประสงค์
+  // 2. สรุปทีมที่ไม่มีคนเข้างาน
+  if (report.inactiveCompanies && report.inactiveCompanies.length > 0) {
+    const inactiveNames = report.inactiveCompanies.map(c => c.companyName).join(', ')
+    lines.push(`💤 ยังไม่มีคนเข้างาน (${report.inactiveCompanies.length} ทีม):`)
+    lines.push(`   ${inactiveNames}`)
+    lines.push(`────────────────`)
+  }
+
+  // 3. รายการแจ้งความประสงค์
   const allRequests = report.companies.flatMap(c =>
     c.lateOrRequests.map(r => ({
       name: r.name,
@@ -343,26 +547,212 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
   const totalRequests = report.companies.reduce((sum, c) => sum + c.lateOrRequests.length, 0)
 
   // ══════════════════════════════════════════════════════════════════════════
-  // Bubble 1: การเข้า-ออก และตรวจสอบความปลอดภัยประจำวัน (ตาม Frame 2)
+  // 3 Summary Badges Box (แสดงบน Bubble แรก)
   // ══════════════════════════════════════════════════════════════════════════
-  const companyRows: any[] = []
+  const summaryBadgesBox = {
+    type: 'box',
+    layout: 'horizontal',
+    spacing: 'sm',
+    contents: [
+      {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#dcfce7',
+        cornerRadius: '8px',
+        paddingAll: '8px',
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        contents: [
+          {
+            type: 'text',
+            text: `ทีมงานรวม ${report.totalPassed}`,
+            size: 'xs',
+            color: '#14532d',
+            weight: 'bold',
+            align: 'center',
+          },
+        ],
+      },
+      {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#fef3c7',
+        cornerRadius: '8px',
+        paddingAll: '8px',
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        contents: [
+          {
+            type: 'text',
+            text: `ไม่มา ${report.totalMissing}`,
+            size: 'xs',
+            color: '#92400e',
+            weight: 'bold',
+            align: 'center',
+          },
+        ],
+      },
+      {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#dbeafe',
+        cornerRadius: '8px',
+        paddingAll: '8px',
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        contents: [
+          {
+            type: 'text',
+            text: `ประสงค์ ${totalRequests}`,
+            size: 'xs',
+            color: '#1e40af',
+            weight: 'bold',
+            align: 'center',
+          },
+        ],
+      },
+    ],
+  }
 
-  report.companies.slice(0, 12).forEach((comp, idx) => {
-    let actTag = comp.activityTag || ''
-    if (!actTag) {
-      if (comp.activityName && comp.companyCode) {
-        actTag = `[${comp.companyCode}] ${comp.activityName}`
-      } else if (comp.activityName) {
-        actTag = comp.activityName
-      } else if (comp.companyCode) {
-        actTag = `[${comp.companyCode}]`
+  // ══════════════════════════════════════════════════════════════════════════
+  // Helper: วาดกล่องข้อมูลทีม (รองรับทั้งแบบโครงการเดียว และแยกหลายโครงการ)
+  // ══════════════════════════════════════════════════════════════════════════
+  const renderCompanyBox = (comp: CompanySummary) => {
+    if (comp.projects && comp.projects.length > 1) {
+      const subProjectsContents: any[] = comp.projects.map((proj, pIdx) => {
+        const statElements: any[] = [
+          {
+            type: 'text',
+            text: `✓ มา ${proj.passedCount}`,
+            size: 'xs',
+            weight: 'bold',
+            color: '#16a34a',
+            flex: 0,
+          },
+        ]
+
+        if (proj.failedCount > 0) {
+          const alcTag = proj.alcCount > 0 ? ' (ALC)' : ''
+          statElements.push({
+            type: 'text',
+            text: `✕ ไม่ผ่าน ${proj.failedCount}${alcTag}`,
+            size: 'xs',
+            weight: 'bold',
+            color: '#dc2626',
+            flex: 0,
+          })
+        }
+
+        if (proj.lateOrRequestsCount > 0) {
+          statElements.push({
+            type: 'text',
+            text: `ประสงค์ ${proj.lateOrRequestsCount}`,
+            size: 'xs',
+            weight: 'bold',
+            color: '#2563eb',
+            flex: 0,
+          })
+        }
+
+        return {
+          type: 'box',
+          layout: 'vertical',
+          spacing: 'xxs',
+          margin: pIdx > 0 ? 'sm' : 'none',
+          contents: [
+            {
+              type: 'box',
+              layout: 'horizontal',
+              contents: [
+                {
+                  type: 'text',
+                  text: proj.activityTag || proj.activityName,
+                  weight: 'bold',
+                  size: 'xs',
+                  color: '#2563eb',
+                  flex: 7,
+                  wrap: true,
+                },
+                ...(proj.location
+                  ? [
+                      {
+                        type: 'text',
+                        text: `📍 ${proj.location}`,
+                        size: 'xs',
+                        color: '#475569',
+                        align: 'end',
+                        flex: 5,
+                        wrap: false,
+                      },
+                    ]
+                  : []),
+              ],
+            },
+            {
+              type: 'box',
+              layout: 'horizontal',
+              spacing: 'md',
+              contents: statElements,
+            },
+          ],
+        }
+      })
+
+      return {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'xs',
+        contents: [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            alignItems: 'center',
+            contents: [
+              {
+                type: 'text',
+                text: comp.companyName,
+                weight: 'bold',
+                size: 'sm',
+                color: '#0f172a',
+                flex: 7,
+                wrap: false,
+              },
+              {
+                type: 'text',
+                text: `แยก ${comp.projects.length} โครงการ (มา ${comp.passedCount})`,
+                size: 'xxs',
+                weight: 'bold',
+                color: '#0284c7',
+                align: 'end',
+                flex: 6,
+              },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            paddingStart: '8px',
+            borderWidth: '2px',
+            borderColor: '#cbd5e1',
+            margin: 'xs',
+            contents: subProjectsContents,
+          },
+        ],
       }
     }
 
-    const statTextElements: any[] = [
+    // กรณีทีมทำโครงการเดียวตามปกติ
+    const proj = comp.projects && comp.projects.length > 0 ? comp.projects[0] : null
+    const actTag = proj?.activityTag || comp.activityTag || ''
+    const loc = proj?.location || comp.location || ''
+
+    const statElements: any[] = [
       {
         type: 'text',
-        text: `มา ${comp.passedCount}`,
+        text: `✓ มา ${comp.passedCount}`,
         size: 'xs',
         weight: 'bold',
         color: '#16a34a',
@@ -370,52 +760,34 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
       },
     ]
 
-    if (comp.alcCount > 0) {
-      statTextElements.push({
+    if (comp.failedCount > 0) {
+      const alcTag = comp.alcCount > 0 ? ' (ALC)' : ''
+      statElements.push({
         type: 'text',
-        text: `ALC ${comp.alcCount}`,
+        text: `✕ ไม่ผ่าน ${comp.failedCount}${alcTag}`,
         size: 'xs',
         weight: 'bold',
         color: '#dc2626',
         flex: 0,
       })
     }
-
-    if (comp.ppeFailedCount > 0) {
-      statTextElements.push({
-        type: 'text',
-        text: `ไม่ผ่าน ${comp.ppeFailedCount}`,
-        size: 'xs',
-        weight: 'bold',
-        color: '#dc2626',
-        flex: 0,
-      })
-    }
-
-    statTextElements.push({
-      type: 'text',
-      text: `ไม่มา ${comp.missingCount}`,
-      size: 'xs',
-      color: '#0f172a',
-      flex: 0,
-    })
 
     if (comp.lateOrRequests.length > 0) {
-      statTextElements.push({
+      statElements.push({
         type: 'text',
-        text: `แจ้งประสงค์ ${comp.lateOrRequests.length}`,
+        text: `ประสงค์ ${comp.lateOrRequests.length}`,
         size: 'xs',
+        weight: 'bold',
         color: '#2563eb',
         flex: 0,
       })
     }
 
-    companyRows.push({
+    return {
       type: 'box',
       layout: 'vertical',
       spacing: 'xs',
       contents: [
-        // Line 1: Company Name (Left) | Activity / Code (Right)
         {
           type: 'box',
           layout: 'horizontal',
@@ -426,193 +798,245 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
               weight: 'bold',
               size: 'sm',
               color: '#0f172a',
-              flex: 5,
-              wrap: true,
+              flex: 7,
+              wrap: false,
             },
-            ...(actTag
+            ...(loc
               ? [
                   {
                     type: 'text',
-                    text: actTag,
-                    weight: 'bold',
+                    text: `📍 ${loc}`,
                     size: 'xs',
-                    color: '#2563eb',
+                    color: '#475569',
                     align: 'end',
                     flex: 5,
-                    wrap: true,
+                    wrap: false,
                   },
                 ]
               : []),
           ],
         },
-        // Line 2: Attendance stats (Left) | Location (Right)
+        ...(actTag
+          ? [
+              {
+                type: 'text',
+                text: actTag,
+                weight: 'bold',
+                size: 'xs',
+                color: '#2563eb',
+                wrap: true,
+              },
+            ]
+          : []),
         {
           type: 'box',
           layout: 'horizontal',
-          contents: [
-            {
-              type: 'box',
-              layout: 'horizontal',
-              spacing: 'md',
-              flex: 7,
-              contents: statTextElements,
-            },
-            ...(comp.location
-              ? [
-                  {
-                    type: 'text',
-                    text: comp.location,
-                    size: 'xs',
-                    color: '#0f172a',
-                    align: 'end',
-                    flex: 3,
-                    wrap: true,
-                  },
-                ]
-              : []),
-          ],
+          spacing: 'md',
+          contents: statElements,
         },
       ],
-    })
-
-    if (idx < Math.min(report.companies.length, 12) - 1) {
-      companyRows.push({
-        type: 'separator',
-        margin: 'md',
-      })
     }
-  })
-
-  if (report.companies.length > 12) {
-    companyRows.push({
-      type: 'text',
-      text: `...และอีก ${report.companies.length - 12} บริษัท`,
-      size: 'xxs',
-      color: '#64748b',
-      align: 'center',
-      margin: 'sm',
-    })
   }
 
-  const overviewBubble = {
-    type: 'bubble',
-    size: 'mega',
-    header: {
-      type: 'box',
-      layout: 'vertical',
-      backgroundColor: '#286b13',
-      paddingAll: '12px',
-      contents: [
-        {
-          type: 'text',
-          text: 'การเข้า-ออก และตรวจสอบความปลอดภัยประจำวัน',
-          weight: 'bold',
-          color: '#ffffff',
-          size: 'xs',
-          wrap: true,
-        },
-      ],
-    },
-    body: {
-      type: 'box',
-      layout: 'vertical',
-      paddingAll: '12px',
-      spacing: 'md',
-      contents: [
-        // 3 Summary Badges
-        {
+  // ══════════════════════════════════════════════════════════════════════════
+  // สร้าง Bubble สรุปการเข้างาน (แบ่งหลาย Bubble อัตโนมัติ หากทีมเกิน CHUNK_SIZE)
+  // ══════════════════════════════════════════════════════════════════════════
+  const CHUNK_SIZE = 7 // จำกัด 7 ทีมต่อ 1 Bubble เพื่อความสวยงาม สบายตา ไม่ล้นจอ
+  const activeCompanies = (report.companies || []).filter(c => c.checkedInCount > 0)
+  const overviewBubbles: any[] = []
+
+  if (activeCompanies.length === 0) {
+    overviewBubbles.push({
+      type: 'bubble',
+      size: 'mega',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#286b13',
+        paddingAll: '12px',
+        contents: [
+          {
+            type: 'text',
+            text: 'การเข้า-ออก และตรวจสอบความปลอดภัยประจำวัน',
+            weight: 'bold',
+            color: '#ffffff',
+            size: 'xs',
+            wrap: true,
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '12px',
+        spacing: 'md',
+        contents: [
+          summaryBadgesBox,
+          {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#f1f5f9',
+            cornerRadius: '8px',
+            paddingAll: '16px',
+            alignItems: 'center',
+            contents: [
+              {
+                type: 'text',
+                text: '⏳ ยังไม่มีข้อมูลการเข้างานในวันนี้',
+                size: 'sm',
+                weight: 'bold',
+                color: '#475569',
+              },
+              {
+                type: 'text',
+                text: 'ระบบจะอัปเดตอัตโนมัติเมื่อทีมงานเริ่มเช็คชื่อ',
+                size: 'xs',
+                color: '#94a3b8',
+                margin: 'xs',
+              },
+            ],
+          },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '10px',
+        backgroundColor: '#f8fafc',
+        contents: [
+          {
+            type: 'text',
+            text: `รายงานเมื่อ: ${currentTime} วันที่ ${dText}`,
+            size: 'xxs',
+            color: '#64748b',
+            align: 'center',
+          },
+        ],
+      },
+    })
+  } else {
+    // แบ่งกลุ่มทีมที่เข้างานเป็น Chunks ทีละ 7 ทีม
+    const companyChunks: CompanySummary[][] = []
+    for (let i = 0; i < activeCompanies.length; i += CHUNK_SIZE) {
+      companyChunks.push(activeCompanies.slice(i, i + CHUNK_SIZE))
+    }
+
+    const totalChunks = companyChunks.length
+
+    companyChunks.forEach((chunk, chunkIdx) => {
+      const isFirst = chunkIdx === 0
+      const isLast = chunkIdx === totalChunks - 1
+
+      const headerTitle =
+        totalChunks > 1
+          ? `การเข้า-ออก และตรวจสอบความปลอดภัย (${chunkIdx + 1}/${totalChunks})`
+          : 'การเข้า-ออก และตรวจสอบความปลอดภัยประจำวัน'
+
+      const chunkRows: any[] = []
+
+      chunk.forEach((comp, idx) => {
+        chunkRows.push(renderCompanyBox(comp))
+        if (idx < chunk.length - 1) {
+          chunkRows.push({
+            type: 'separator',
+            margin: 'sm',
+          })
+        }
+      })
+
+      // หากเป็น Bubble สุดท้าย และมีทีมที่ไม่มา ให้ใส่กล่องสรุปทีมที่ยังไม่เข้างานด้านล่าง
+      if (isLast && report.inactiveCompanies && report.inactiveCompanies.length > 0) {
+        const inactiveNames = report.inactiveCompanies
+          .slice(0, 8)
+          .map(c => c.companyName)
+          .join(', ')
+        const remainingCount = report.inactiveCompanies.length - 8
+        const inactiveSummaryText =
+          remainingCount > 0 ? `${inactiveNames} ...และอีก ${remainingCount} ทีม` : inactiveNames
+
+        chunkRows.push({
           type: 'box',
-          layout: 'horizontal',
-          spacing: 'sm',
+          layout: 'vertical',
+          backgroundColor: '#f8fafc',
+          cornerRadius: '6px',
+          paddingAll: '8px',
+          margin: 'md',
           contents: [
             {
-              type: 'box',
-              layout: 'vertical',
-              backgroundColor: '#dcfce7',
-              cornerRadius: '8px',
-              paddingAll: '8px',
-              flex: 1,
-              alignItems: 'center',
-              justifyContent: 'center',
-              contents: [
-                {
-                  type: 'text',
-                  text: `ทีมงานรวม ${report.totalPassed}`,
-                  size: 'xs',
-                  color: '#14532d',
-                  weight: 'bold',
-                  align: 'center',
-                },
-              ],
+              type: 'text',
+              text: `💤 ยังไม่มีคนเข้างาน (${report.inactiveCompanies.length} ทีม)`,
+              size: 'xxs',
+              weight: 'bold',
+              color: '#64748b',
             },
             {
-              type: 'box',
-              layout: 'vertical',
-              backgroundColor: '#fef3c7',
-              cornerRadius: '8px',
-              paddingAll: '8px',
-              flex: 1,
-              alignItems: 'center',
-              justifyContent: 'center',
-              contents: [
-                {
-                  type: 'text',
-                  text: `ไม่มา ${report.totalMissing}`,
-                  size: 'xs',
-                  color: '#92400e',
-                  weight: 'bold',
-                  align: 'center',
-                },
-              ],
+              type: 'text',
+              text: inactiveSummaryText,
+              size: 'xxs',
+              color: '#94a3b8',
+              wrap: true,
+              margin: 'xs',
             },
+          ],
+        })
+      }
+
+      const bodyContents: any[] = []
+      if (isFirst) {
+        bodyContents.push(summaryBadgesBox)
+      }
+
+      bodyContents.push({
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        margin: isFirst ? 'md' : 'none',
+        contents: chunkRows,
+      })
+
+      overviewBubbles.push({
+        type: 'bubble',
+        size: 'mega',
+        header: {
+          type: 'box',
+          layout: 'vertical',
+          backgroundColor: '#286b13',
+          paddingAll: '12px',
+          contents: [
             {
-              type: 'box',
-              layout: 'vertical',
-              backgroundColor: '#dbeafe',
-              cornerRadius: '8px',
-              paddingAll: '8px',
-              flex: 1,
-              alignItems: 'center',
-              justifyContent: 'center',
-              contents: [
-                {
-                  type: 'text',
-                  text: `ประสงค์ ${totalRequests}`,
-                  size: 'xs',
-                  color: '#1e40af',
-                  weight: 'bold',
-                  align: 'center',
-                },
-              ],
+              type: 'text',
+              text: headerTitle,
+              weight: 'bold',
+              color: '#ffffff',
+              size: 'xs',
+              wrap: true,
             },
           ],
         },
-
-        // Company Rows
-        {
+        body: {
           type: 'box',
           layout: 'vertical',
+          paddingAll: '12px',
           spacing: 'md',
-          margin: 'md',
-          contents: companyRows,
+          contents: bodyContents,
         },
-      ],
-    },
-    footer: {
-      type: 'box',
-      layout: 'vertical',
-      paddingAll: '10px',
-      backgroundColor: '#f8fafc',
-      contents: [
-        {
-          type: 'text',
-          text: `รายงานเมื่อ: ${currentTime} วันที่ ${dText}`,
-          size: 'xxs',
-          color: '#64748b',
-          align: 'center',
+        footer: {
+          type: 'box',
+          layout: 'vertical',
+          paddingAll: '10px',
+          backgroundColor: '#f8fafc',
+          contents: [
+            {
+              type: 'text',
+              text: `รายงานเมื่อ: ${currentTime} วันที่ ${dText}`,
+              size: 'xxs',
+              color: '#64748b',
+              align: 'center',
+            },
+          ],
         },
-      ],
-    },
+      })
+    })
   }
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -781,8 +1205,8 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
     },
   }
 
-  // Carousel 2 bubbles: Bubble 1 (การเข้า-ออกและตรวจสอบความปลอดภัยประจำวัน) + Bubble 2 (รายการแจ้งความประสงค์)
-  const totalBubbles = [overviewBubble, requestsBubble]
+  // รวม Bubble สรุปการเข้างาน (แบ่งหน้าอัตโนมัติ) + Bubble รายการแจ้งความประสงค์
+  const totalBubbles = [...overviewBubbles, requestsBubble]
 
   return {
     type: 'flex',
