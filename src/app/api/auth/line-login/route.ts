@@ -13,8 +13,9 @@ import {
  *
  * Flow:
  * 1. ค้นหา user_profile จาก line_user_id
- * 2. ถ้าพบ → login ทันที
- * 3. ถ้าไม่พบ → return { linked: false } ให้ client ถามเบอร์โทรเพื่อผูกบัญชี
+ * 2. Fallback: ค้นหาจาก line_group หรือ Auth user_metadata
+ * 3. ถ้าพบ → login ทันที
+ * 4. ถ้าไม่พบ → return { linked: false } ให้ client ถามเบอร์โทรเพื่อผูกบัญชี
  */
 export async function POST(req: Request) {
   try {
@@ -25,13 +26,66 @@ export async function POST(req: Request) {
     }
 
     const supabase = createServiceClient()
+    let profile: any = null
 
-    // ค้นหาจาก line_user_id
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('line_user_id', lineUserId)
-      .maybeSingle()
+    // 1. ค้นหาจาก line_user_id ใน user_profiles
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('line_user_id', lineUserId)
+        .maybeSingle()
+
+      if (!error && data) {
+        profile = data
+      }
+    } catch {
+      // Ignored if column missing
+    }
+
+    // 2. Fallback: ค้นหาจาก line_group ใน user_profiles
+    if (!profile) {
+      try {
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('line_group', lineUserId)
+          .maybeSingle()
+
+        if (!error && data) {
+          profile = data
+        }
+      } catch {}
+    }
+
+    // 3. Fallback: ค้นหาจาก Supabase Auth user_metadata
+    if (!profile) {
+      try {
+        const { data: authList } = await supabase.auth.admin.listUsers({ perPage: 100 })
+        const matchedUser = authList?.users?.find(
+          u => u.user_metadata?.line_user_id === lineUserId
+        )
+        if (matchedUser) {
+          const { data: userProfile } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('id', matchedUser.id)
+            .maybeSingle()
+
+          if (userProfile) {
+            profile = {
+              ...userProfile,
+              line_user_id: lineUserId,
+              line_display_name: matchedUser.user_metadata?.line_display_name || displayName,
+              line_picture_url: matchedUser.user_metadata?.line_picture_url || pictureUrl,
+              phone: userProfile.phone || matchedUser.user_metadata?.phone,
+            }
+          }
+        }
+      } catch (authErr) {
+        console.warn('[line-login] auth listUsers fallback note:', authErr)
+      }
+    }
 
     if (!profile) {
       // ยังไม่ได้ผูกบัญชี → ให้ client ถามเบอร์โทร
@@ -49,28 +103,32 @@ export async function POST(req: Request) {
     }
 
     // อัพเดต LINE display name / picture ถ้าเปลี่ยน
-    if (
-      displayName !== profile.line_display_name ||
-      pictureUrl !== profile.line_picture_url
-    ) {
-      await supabase
-        .from('user_profiles')
-        .update({
-          line_display_name: displayName,
-          line_picture_url: pictureUrl,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', profile.id)
+    try {
+      if (
+        displayName !== profile.line_display_name ||
+        pictureUrl !== profile.line_picture_url
+      ) {
+        await supabase
+          .from('user_profiles')
+          .update({
+            line_display_name: displayName,
+            line_picture_url: pictureUrl,
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', profile.id)
+      }
+    } catch {
+      // Ignored if columns missing
     }
 
     const sessionUser: SessionUser = {
       userId: profile.id,
-      phone: profile.phone,
-      full_name: profile.line_display_name ?? profile.full_name,
-      role: profile.role,
+      phone: profile.phone || (profile.email && profile.email.endsWith('@phone.auth') ? profile.email.replace('@phone.auth', '') : ''),
+      full_name: profile.line_display_name ?? profile.full_name ?? displayName,
+      role: profile.role || 'supervisor',
       email: profile.email,
       department: profile.department,
-      lineUserId: profile.line_user_id,
+      lineUserId: profile.line_user_id || lineUserId,
       lineDisplayName: displayName,
       linePictureUrl: pictureUrl,
       is_active: profile.is_active ?? true,
@@ -93,3 +151,4 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: 'เกิดข้อผิดพลาดภายในระบบ' }, { status: 500 })
   }
 }
+
