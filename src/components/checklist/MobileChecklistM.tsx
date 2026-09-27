@@ -982,20 +982,8 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
               </div>
             </div>
 
-            {/* User Profile / Auth Pill & Settings */}
+            {/* User Profile / Auth Pill */}
             <div className="flex items-center gap-1.5 shrink-0">
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => setIsSettingsModalOpen(true)}
-                  className="h-8 px-2.5 rounded-full bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1 border border-white/20 transition-all active:scale-95"
-                  title="ตั้งค่ารายการเช็คลิสต์ PPE"
-                >
-                  <Sliders className="w-3.5 h-3.5 text-emerald-400" />
-                  <span>ตั้งค่า</span>
-                </button>
-              )}
-
               {onOpenAuth && (
                 <button
                   onClick={onOpenAuth}
@@ -1295,16 +1283,6 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                     <MessageSquare className="w-3.5 h-3.5 text-[#06C755]" />
                   </button>
                 </>
-              )}
-              {isAdmin && (
-                <button
-                  type="button"
-                  onClick={() => setIsSettingsModalOpen(true)}
-                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white flex items-center justify-center border border-white/20 transition-all active:scale-95"
-                  title="ตั้งค่ารายการเช็คลิสต์ PPE"
-                >
-                  <Sliders className="w-3.5 h-3.5 text-emerald-400" />
-                </button>
               )}
               <button
                 onClick={() => handleOpenBatchModal()}
@@ -1640,18 +1618,6 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                 ฟอร์มตรวจความปลอดภัยรายคน
               </p>
             </div>
-
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => setIsSettingsModalOpen(true)}
-                className="h-8 px-2.5 rounded-full bg-white/10 hover:bg-white/20 text-slate-200 hover:text-white text-xs font-semibold flex items-center gap-1 border border-white/20 transition-all active:scale-95"
-                title="ตั้งค่ารายการเช็คลิสต์ PPE"
-              >
-                <Sliders className="w-3.5 h-3.5 text-emerald-400" />
-                <span className="hidden sm:inline">ตั้งค่า</span>
-              </button>
-            )}
           </div>
 
           {/* Scrollable Form Area */}

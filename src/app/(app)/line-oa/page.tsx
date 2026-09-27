@@ -1170,6 +1170,34 @@ export default function LineOAPage() {
                           placeholder={config.line_broadcast ? 'Broadcast ไปยังผู้ติดตามทุกคน' : 'เช่น U12345678... หรือ C12345678...'}
                           className="h-8 text-xs bg-white border-slate-300 font-mono disabled:opacity-50"
                         />
+                        {/* Live Validation & Guidance */}
+                        {config.line_broadcast ? (
+                          <p className="text-[10px] text-emerald-600 font-medium">
+                            ✓ ส่งแบบ Broadcast ไปยังผู้ติดตามทุกคนใน LINE OA โดยอัตโนมัติ (ไม่ต้องระบุ ID)
+                          </p>
+                        ) : config.line_target_id.trim() ? (
+                          /^[UCR][0-9a-zA-Z]{32}$/.test(config.line_target_id.trim()) ? (
+                            <p className="text-[10px] text-emerald-600 font-medium">
+                              ✓ รูปแบบ ID ถูกต้อง ({config.line_target_id.startsWith('U') ? 'User ID' : config.line_target_id.startsWith('C') ? 'Group ID' : 'Room ID'})
+                            </p>
+                          ) : (
+                            <div className="p-2 rounded-lg bg-amber-50 border border-amber-200 text-[10px] text-amber-800 space-y-1">
+                              <p className="font-semibold">⚠️ รูปแบบ Target ID ไม่ถูกต้องสำหรับ LINE Messaging API</p>
+                              <p>LINE กำหนดให้ ID ต้องขึ้นต้นด้วย <code>U...</code> (User) หรือ <code>C...</code> (Group) รวม 33 ตัวอักษร (ไม่ใช่ชื่อกลุ่มหรือ LINE ID ทั่วไป)</p>
+                              <button
+                                type="button"
+                                onClick={() => setConfig(prev => ({ ...prev, line_broadcast: true }))}
+                                className="text-emerald-700 font-bold underline hover:text-emerald-800 block text-[11px]"
+                              >
+                                👉 คลิกที่นี่เพื่อเปลี่ยนเป็น &quot;Broadcast ส่งหาทุกคน&quot; ทันที
+                              </button>
+                            </div>
+                          )
+                        ) : (
+                          <p className="text-[10px] text-slate-500">
+                            เว้นว่างไว้ หรือติ๊ก Broadcast เพื่อส่งหาทุกคนที่ติดตาม LINE OA
+                          </p>
+                        )}
                       </div>
 
                       <div className="space-y-1 pt-1 border-t border-slate-200">

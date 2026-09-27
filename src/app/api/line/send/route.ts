@@ -86,7 +86,10 @@ export async function POST(req: NextRequest) {
           ? [flex]
           : [{ type: 'text', text: message }]
 
-        if (broadcast || !targetId) {
+        const cleanTargetId = (targetId || '').trim()
+        const isLikelyValidId = /^[UCR][0-9a-zA-Z]{32}$/.test(cleanTargetId)
+
+        if (broadcast || !cleanTargetId) {
           // Broadcast to all followers
           const broadcastRes = await fetch('https://api.line.me/v2/bot/message/broadcast', {
             method: 'POST',
@@ -103,6 +106,11 @@ export async function POST(req: NextRequest) {
             ok: broadcastRes.ok,
             data: broadcastData,
           }
+        } else if (!isLikelyValidId) {
+          results.lineOA = {
+            ok: false,
+            error: `Target ID "${cleanTargetId}" ไม่ถูกต้อง (LINE กำหนดให้ User ID ต้องขึ้นต้นด้วย U... หรือ Group ID ขึ้นต้นด้วย C... รวม 33 ตัวอักษร ไม่ใช่ชื่อกลุ่ม) — แนะนำให้ติ๊กเปิด Broadcast หรือเว้นช่อง Target ID ให้ว่าง`,
+          }
         } else {
           // Push message to specific user / group
           const pushRes = await fetch('https://api.line.me/v2/bot/message/push', {
@@ -112,7 +120,7 @@ export async function POST(req: NextRequest) {
               Authorization: `Bearer ${channelToken}`,
             },
             body: JSON.stringify({
-              to: targetId,
+              to: cleanTargetId,
               messages,
             }),
           })
@@ -153,7 +161,14 @@ export async function POST(req: NextRequest) {
     if (!isAnySuccess) {
       let errMsg = 'ส่งข้อความไม่สำเร็จ'
       if (results.lineOA && !results.lineOA.ok) {
-        errMsg = `LINE OA: ${results.lineOA.data?.message || results.lineOA.error || 'ส่งไม่สำเร็จ'}`
+        let msg = results.lineOA.data?.message || results.lineOA.error || 'ส่งไม่สำเร็จ'
+        if (msg === 'Failed to send messages') {
+          msg = 'ไม่สามารถส่งข้อความได้ (Target ID ไม่ถูกต้อง หรือ LINE OA บอทยังไม่ได้ถูกดึงเข้ากลุ่ม LINE หรือผู้รับยังไม่ได้เป็นเพื่อนกับบอท หรือติ๊กเปิด Broadcast เพื่อส่งหาทุกคน)'
+        }
+        const detailsStr = Array.isArray(results.lineOA.data?.details)
+          ? results.lineOA.data.details.map((d: any) => `${d.property ? `${d.property}: ` : ''}${d.message}`).join(', ')
+          : ''
+        errMsg = `LINE OA: ${msg}${detailsStr ? ` (${detailsStr})` : ''}`
       } else if (results.telegram && !results.telegram.ok) {
         errMsg = `Telegram: ${results.telegram.data?.description || results.telegram.error || 'ส่งไม่สำเร็จ'}`
       }

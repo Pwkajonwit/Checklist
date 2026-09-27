@@ -1,5 +1,5 @@
 import type { ChecklistEntry, Contractor, Company, Activity } from '@/lib/types'
-import { isAlcoholPassed } from '@/lib/types'
+import { isAlcoholPassed, cleanCompanyCode } from '@/lib/types'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
 
@@ -150,7 +150,7 @@ export function buildDailyReportData(
     totalRegistered += regCount
 
     const compObj = companies.find(c => c.name === compName || (c.code && c.code === compName))
-    const compCode = compObj?.code ? compObj.code.trim() : ''
+    const compCode = cleanCompanyCode(compObj?.code) || ''
 
     // จัดกลุ่มพนักงานที่เข้างานตามโครงการ (activity + location)
     const projectMap = new Map<
@@ -511,7 +511,7 @@ export function formatDailyLineMessage(report: DailyReportData): string {
       purpose: r.purpose,
       checkInTime: r.checkInTime,
       companyName: c.companyName,
-      companyCode: r.companyCode || c.companyCode || '',
+      companyCode: cleanCompanyCode(r.companyCode || c.companyCode) || '',
       location: r.location || c.location || '',
     }))
   )
@@ -519,7 +519,8 @@ export function formatDailyLineMessage(report: DailyReportData): string {
   if (allRequests.length > 0) {
     lines.push(`📝 รายการแจ้งความประสงค์:`)
     allRequests.forEach(r => {
-      const codeStr = r.companyCode ? ` [ ${r.companyCode} ]` : ''
+      const cleanCode = cleanCompanyCode(r.companyCode)
+      const codeStr = cleanCode ? ` [${cleanCode}]` : ''
       const locStr = r.location ? ` | ${r.location}` : ''
       lines.push(`• ${r.companyName}${codeStr}: ${r.name}  ${r.purpose}${locStr}`)
     })
@@ -559,18 +560,21 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
         layout: 'vertical',
         backgroundColor: '#dcfce7',
         cornerRadius: '8px',
-        paddingAll: '8px',
+        paddingAll: '6px',
+        paddingStart: '4px',
+        paddingEnd: '4px',
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
         contents: [
           {
             type: 'text',
-            text: `ทีมงานรวม ${report.totalPassed}`,
+            text: `เข้างาน ${report.totalPassed}`,
             size: 'xs',
             color: '#14532d',
             weight: 'bold',
             align: 'center',
+            wrap: true,
           },
         ],
       },
@@ -579,7 +583,9 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
         layout: 'vertical',
         backgroundColor: '#fef3c7',
         cornerRadius: '8px',
-        paddingAll: '8px',
+        paddingAll: '6px',
+        paddingStart: '4px',
+        paddingEnd: '4px',
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
@@ -591,6 +597,7 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
             color: '#92400e',
             weight: 'bold',
             align: 'center',
+            wrap: true,
           },
         ],
       },
@@ -599,7 +606,9 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
         layout: 'vertical',
         backgroundColor: '#dbeafe',
         cornerRadius: '8px',
-        paddingAll: '8px',
+        paddingAll: '6px',
+        paddingStart: '4px',
+        paddingEnd: '4px',
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
@@ -611,6 +620,7 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
             color: '#1e40af',
             weight: 'bold',
             align: 'center',
+            wrap: true,
           },
         ],
       },
@@ -660,7 +670,7 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
         return {
           type: 'box',
           layout: 'vertical',
-          spacing: 'xxs',
+          spacing: 'xs',
           margin: pIdx > 0 ? 'sm' : 'none',
           contents: [
             {
@@ -734,9 +744,9 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
           {
             type: 'box',
             layout: 'vertical',
-            paddingStart: '8px',
-            borderWidth: '2px',
-            borderColor: '#cbd5e1',
+            backgroundColor: '#f8fafc',
+            cornerRadius: '6px',
+            paddingAll: '8px',
             margin: 'xs',
             contents: subProjectsContents,
           },
@@ -1048,7 +1058,7 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
       purpose: r.purpose,
       checkInTime: r.checkInTime,
       companyName: c.companyName,
-      companyCode: r.companyCode || c.companyCode || '',
+      companyCode: cleanCompanyCode(r.companyCode || c.companyCode) || '',
       location: r.location || c.location || '',
     }))
   )
@@ -1082,9 +1092,7 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
     })
   } else {
     allRequests.slice(0, 10).forEach((r, idx) => {
-      const compLabel = r.companyCode
-        ? `${r.companyName} [ ${r.companyCode} ]`
-        : r.companyName
+      const compLabel = r.companyName
 
       requestRows.push({
         type: 'box',
