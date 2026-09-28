@@ -300,3 +300,27 @@ export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
   cron_secret: 'sitecheck-cron-secret',
 }
 
+// ── Meal Allowance & Catering Configuration (Feature Toggle for future) ──
+export interface MealConfig {
+  enabled: boolean            // เปิดใช้งานระบบเบิกค่าอาหารและข้าวกล่องหรือไม่ (ค่าเริ่มต้น: false)
+  price_per_meal: number      // อัตราค่าอาหารต่อคน/มื้อ (บาท) เช่น 60
+  allow_ot_dinner: boolean    // เปิดตัวเลือกมื้อเย็น/OT หรือไม่
+  ot_price_per_meal: number   // อัตราค่าอาหารมื้อเย็น/OT (บาท) เช่น 70
+  cut_off_time: string        // เวลาตัดรอบสรุปยอดสั่งข้าว เช่น '10:00'
+  catering_shop_name?: string // ชื่อร้านข้าวประจำ
+  catering_phone?: string     // เบอร์โทรร้านข้าว
+  line_notify_template?: string // ข้อความสำหรับส่งไลน์สั่งข้าว
+}
+
+export const DEFAULT_MEAL_CONFIG: MealConfig = {
+  enabled: false,             // ปิดการทำงานไว้เป็นค่าเริ่มต้น (ซ่อนจากหน้าจอ)
+  price_per_meal: 60,
+  allow_ot_dinner: false,
+  ot_price_per_meal: 70,
+  cut_off_time: '10:00',
+  catering_shop_name: '',
+  catering_phone: '',
+  line_notify_template: '🍱 สรุปยอดสั่งข้าวกล่อง โครงการ\nประจำวันที่: {date}\nรวมทั้งหมด: {total} กล่อง\n{breakdown}\n\nกรุณาส่งก่อน 11:45 น. ขอบคุณครับ',
+}
+
+

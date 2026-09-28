@@ -64,6 +64,57 @@ export default function LineOAPage() {
   const [sentSlots, setSentSlots] = useState<string[]>([])
   const [currentTimeStr, setCurrentTimeStr] = useState<string>('')
 
+  // Server Scheduler Diagnostics State
+  const [serverSchedulerInfo, setServerSchedulerInfo] = useState<{
+    serverActive: boolean
+    nextScheduledSlot: string | null
+    sentSlotsToday: string[]
+    lastRun: any
+    serverBangkokTime: string
+  } | null>(null)
+  const [testingTrigger, setTestingTrigger] = useState(false)
+  const [copiedWebhook, setCopiedWebhook] = useState(false)
+
+  // Fetch live server scheduler diagnostics
+  const fetchSchedulerStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/line/scheduler-status')
+      if (res.ok) {
+        const data = await res.json()
+        setServerSchedulerInfo(data)
+        if (data.serverBangkokTime) {
+          setCurrentTimeStr(data.serverBangkokTime)
+        }
+      }
+    } catch (err) {
+      console.warn('Fetch scheduler status error:', err)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchSchedulerStatus()
+    const timer = setInterval(fetchSchedulerStatus, 20_000)
+    return () => clearInterval(timer)
+  }, [fetchSchedulerStatus])
+
+  // Test trigger scheduled cron immediately
+  const handleTestTriggerNow = async () => {
+    setTestingTrigger(true)
+    try {
+      const res = await fetch('/api/line/cron?secret=sitecheck-cron-secret&force=true')
+      const data = await res.json()
+      if (!res.ok || !data.success) {
+        throw new Error(data.error || 'ส่งสรุปรายงานไม่สำเร็จ กรุณาตรวจสอบการตั้งค่า Token')
+      }
+      toast.success('🚀 ทดสอบยิง Trigger สำเร็จ! ส่งสรุปรายงานประจำวันเข้า LINE OA / Telegram เรียบร้อยแล้ว')
+      await fetchSchedulerStatus()
+    } catch (err: any) {
+      toast.error(`ทดสอบยิง Trigger ไม่สำเร็จ: ${err.message}`)
+    } finally {
+      setTestingTrigger(false)
+    }
+  }
+
   // Load saved config from Supabase / localStorage & sent logs
   useEffect(() => {
     const loadConfig = async () => {
@@ -291,31 +342,14 @@ export default function LineOAPage() {
     }
   }, [config, formatMode, lineTextMessage, flexMessage])
 
-  // Auto Scheduler Background Check Loop (Every 15s)
+  // Keep local clock display updated
   useEffect(() => {
     const timer = setInterval(() => {
       const now = new Date()
-      const nowTime = format(now, 'HH:mm')
-      const todayStr = format(now, 'yyyy-MM-dd')
-      setCurrentTimeStr(nowTime)
-
-      if (!config.schedule_enabled || !config.schedule_times || config.schedule_times.length === 0) {
-        return
-      }
-
-      // Check if current minute matches any scheduled slot
-      if (config.schedule_times.includes(nowTime)) {
-        const slotKey = `${todayStr} ${nowTime}`
-        // Check if already dispatched this slot today
-        if (!sentSlots.includes(slotKey)) {
-          console.log(`Triggering scheduled notification for slot: ${slotKey}`)
-          dispatchSend(true, nowTime)
-        }
-      }
+      setCurrentTimeStr(format(now, 'HH:mm'))
     }, 15000)
-
     return () => clearInterval(timer)
-  }, [config.schedule_enabled, config.schedule_times, sentSlots, dispatchSend])
+  }, [])
 
   // Time slot handlers
   const handleAddTimeSlot = () => {
@@ -422,13 +456,14 @@ export default function LineOAPage() {
                 ? 'bg-blue-50 text-blue-900 border-blue-300 hover:bg-blue-100'
                 : 'bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200'
             }`}
-            title="คลิกเพื่อตั้งค่ารอบเวลาส่งอัตโนมัติ"
+            title="คลิกเพื่อดูสถานะและตั้งค่ารอบเวลาส่งอัตโนมัติ"
           >
+            <span className={`w-2 h-2 rounded-full shrink-0 ${config.schedule_enabled ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'}`} />
             <Timer className={`w-3.5 h-3.5 ${config.schedule_enabled ? 'text-blue-600' : 'text-slate-500'}`} />
             <span>
               {config.schedule_enabled ? (
                 <>
-                  ส่งอัตโนมัติ: <strong className="text-blue-950 font-mono">รอบ {nextScheduledSlot || 'เปิดอยู่'} น.</strong>
+                  ส่งอัตโนมัติ: <strong className="text-blue-950 font-mono">รอบ {serverSchedulerInfo?.nextScheduledSlot || nextScheduledSlot || 'เปิดอยู่'} น.</strong>
                 </>
               ) : (
                 'ส่งอัตโนมัติ: ปิดอยู่'
@@ -1379,22 +1414,111 @@ export default function LineOAPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* Server-Side Scheduler Status & Diagnostics Card */}
+                <div className="p-3 rounded-lg border border-blue-200 bg-gradient-to-br from-blue-50/70 to-indigo-50/50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span className="relative flex h-2.5 w-2.5">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                      </span>
+                      <span className="text-xs font-bold text-blue-950">สถานะเซิร์ฟเวอร์ระบบส่งอัตโนมัติ (Server Scheduler)</span>
+                    </div>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-mono font-bold">
+                      เวลาเซิร์ฟเวอร์: {serverSchedulerInfo?.serverBangkokTime || currentTimeStr} น.
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 pt-1 text-xs">
+                    <div className="bg-white/80 p-2 rounded border border-blue-100">
+                      <span className="text-[10px] text-slate-500 block">รอบเวลาส่งถัดไป</span>
+                      <strong className="text-blue-900 font-mono font-bold text-xs">
+                        {serverSchedulerInfo?.nextScheduledSlot || nextScheduledSlot || 'ไม่มีรอบเวลา'}
+                      </strong>
+                    </div>
+                    <div className="bg-white/80 p-2 rounded border border-blue-100">
+                      <span className="text-[10px] text-slate-500 block">สถานะการทำงาน</span>
+                      <span className="text-emerald-700 font-bold text-xs flex items-center gap-1">
+                        <CheckCircle className="w-3.5 h-3.5" />
+                        <span>ทำงานตลอด 24 ชม.</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {serverSchedulerInfo?.lastRun && (
+                    <div className="text-[11px] p-2 rounded bg-white/90 border border-slate-200 text-slate-700 flex items-center justify-between">
+                      <span>รอบที่ส่งล่าสุด: <strong>{serverSchedulerInfo.lastRun.time} น.</strong></span>
+                      <span className={serverSchedulerInfo.lastRun.success ? 'text-emerald-600 font-bold' : 'text-red-600 font-bold'}>
+                        {serverSchedulerInfo.lastRun.success ? '✓ ส่งเรียบร้อย' : '✕ เกิดข้อผิดพลาด'}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="text-[10px] text-slate-500 leading-relaxed">
+                    💡 ระบบทำงานเบื้องหลังบนเซิร์ฟเวอร์โดยตรง ไม่จำเป็นต้องเปิดหน้าจอนี้ค้างไว้ เมื่อถึงเวลาที่กำหนด ระบบจะดึงข้อมูลสรุปแล้วส่งเข้า LINE OA / Telegram ทันที
+                  </div>
+                </div>
+
+                {/* Cloud Cron / Webhook URL Card */}
+                <div className="p-3 rounded-lg border border-slate-200 bg-slate-50 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Code className="w-3.5 h-3.5 text-slate-600" />
+                      <span>Webhook URL สำหรับ Supabase pg_cron / Cloud Cron</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const url = typeof window !== 'undefined'
+                          ? `${window.location.origin}/api/line/cron?secret=${config.cron_secret || 'sitecheck-cron-secret'}`
+                          : `/api/line/cron?secret=${config.cron_secret || 'sitecheck-cron-secret'}`
+                        navigator.clipboard.writeText(url)
+                        setCopiedWebhook(true)
+                        toast.success('คัดลอก Webhook URL เรียบร้อย')
+                        setTimeout(() => setCopiedWebhook(false), 2000)
+                      }}
+                      className="text-[11px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1"
+                    >
+                      {copiedWebhook ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedWebhook ? 'คัดลอกแล้ว' : 'คัดลอก URL'}</span>
+                    </button>
+                  </div>
+                  <div className="p-1.5 bg-white border border-slate-300 rounded font-mono text-[11px] text-slate-600 break-all select-all">
+                    /api/line/cron?secret={config.cron_secret || 'sitecheck-cron-secret'}
+                  </div>
+                </div>
               </div>
             )}
           </div>
 
           <DialogFooter className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2 shrink-0">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={handleTestConnection}
-              disabled={testingConnection}
-              className="h-8 text-xs border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 font-bold gap-1.5"
-            >
-              {testingConnection ? <Loader2 className="w-3 h-3 animate-spin" /> : <BellRing className="w-3 h-3" />}
-              <span>ทดสอบส่งข้อความ (Test Connection)</span>
-            </Button>
+            {activeConfigTab === 'schedule' ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleTestTriggerNow}
+                disabled={testingTrigger}
+                className="h-8 text-xs border-blue-300 bg-blue-50 text-blue-900 hover:bg-blue-100 font-bold gap-1.5"
+                title="ทดสอบสร้างและส่งรายงานสรุปเข้า LINE OA & Telegram ทันทีเพื่อทดสอบการทำงาน"
+              >
+                {testingTrigger ? <Loader2 className="w-3 h-3 animate-spin" /> : <SendHorizontal className="w-3 h-3 text-blue-600" />}
+                <span>ทดสอบยิง Trigger ตอนนี้ (Run Trigger Now)</span>
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleTestConnection}
+                disabled={testingConnection}
+                className="h-8 text-xs border-emerald-300 bg-emerald-50 text-emerald-900 hover:bg-emerald-100 font-bold gap-1.5"
+              >
+                {testingConnection ? <Loader2 className="w-3 h-3 animate-spin" /> : <BellRing className="w-3 h-3" />}
+                <span>ทดสอบส่งข้อความ (Test Connection)</span>
+              </Button>
+            )}
 
             <div className="flex items-center gap-1.5">
               <Button

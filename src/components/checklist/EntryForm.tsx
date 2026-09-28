@@ -70,6 +70,7 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
   // Dynamic PPE Items from Settings
   const [ppeConfigItems, setPpeConfigItems] = useState<ChecklistPpeItem[]>(DEFAULT_CHECKLIST_PPE_ITEMS)
   const [ppeDetails, setPpeDetails] = useState<Record<string, boolean>>({})
+  const [mealEnabled, setMealEnabled] = useState(false)
 
   useEffect(() => {
     fetch(`/api/settings?id=checklist_ppe_items&t=${Date.now()}`, { cache: 'no-store' })
@@ -77,6 +78,15 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
       .then(json => {
         if (json.success && Array.isArray(json.data) && json.data.length > 0) {
           setPpeConfigItems(json.data)
+        }
+      })
+      .catch(() => {})
+
+    fetch(`/api/settings?id=meal_config&t=${Date.now()}`, { cache: 'no-store' })
+      .then(r => r.json())
+      .then(json => {
+        if (json.success && json.data) {
+          setMealEnabled(!!json.data.enabled)
         }
       })
       .catch(() => {})
@@ -677,7 +687,7 @@ export function EntryForm({ entryId, defaultDate }: EntryFormProps) {
               <Separator className="my-2" />
               <div className="space-y-2">
                 {[
-                  { key: 'meal_allowance' as const, label: '🍱 เบี้ยเลี้ยงอาหาร (กิน)', activeBorder: 'border-amber-200 bg-amber-50/40 text-amber-900' },
+                  ...(mealEnabled ? [{ key: 'meal_allowance' as const, label: '🍱 เบี้ยเลี้ยงอาหาร (กิน)', activeBorder: 'border-amber-200 bg-amber-50/40 text-amber-900' }] : []),
                   { key: 'noise_area' as const, label: '🔊 พื้นที่เสียงดัง', activeBorder: 'border-orange-200 bg-orange-50/40 text-orange-900' },
                   { key: 'is_blacklisted' as const, label: '⛔ บัญชีดำ (ห้ามเข้าปฏิบัติงาน)', activeBorder: 'border-rose-300 bg-rose-50/60 text-rose-900' },
                 ].map(f => (

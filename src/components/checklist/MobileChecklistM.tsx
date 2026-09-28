@@ -18,6 +18,8 @@ import {
   normalizeAlcForDb,
   ChecklistPpeItem,
   DEFAULT_CHECKLIST_PPE_ITEMS,
+  MealConfig,
+  DEFAULT_MEAL_CONFIG,
 } from '@/lib/types'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
@@ -237,6 +239,28 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
     return () => window.removeEventListener('focus', handleFocus)
   }, [loadPpeSettings])
 
+  // ── Meal Allowance & Catering Configuration State ──
+  const [mealConfig, setMealConfig] = useState<MealConfig>(DEFAULT_MEAL_CONFIG)
+  const [formMealAllowance, setFormMealAllowance] = useState(false)
+  const [batchMealAllowance, setBatchMealAllowance] = useState(false)
+
+  const loadMealSettings = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/settings?id=meal_config&t=${Date.now()}`, { cache: 'no-store' })
+      const json = await res.json()
+      if (json.success && json.data) {
+        setMealConfig({ ...DEFAULT_MEAL_CONFIG, ...json.data })
+      }
+    } catch {}
+  }, [])
+
+  useEffect(() => {
+    loadMealSettings()
+    const handleFocus = () => loadMealSettings()
+    window.addEventListener('focus', handleFocus)
+    return () => window.removeEventListener('focus', handleFocus)
+  }, [loadMealSettings])
+
   // Active items (enabled in settings)
   const activePpeItems = useMemo(() => {
     const active = ppeConfigItems.filter(i => i.is_active)
@@ -405,6 +429,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       ppeFailedCount: number
       missingCount: number
       requestCount: number
+      mealCount: number
     }>()
 
     // Group contractors by company
@@ -428,6 +453,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
             ppeFailedCount: 0,
             missingCount: 0,
             requestCount: 0,
+            mealCount: 0,
           })
         }
         map.get(compName)!.members.push(c)
@@ -450,6 +476,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       let alcFail = 0
       let ppeFail = 0
       let reqCount = 0
+      let mealCount = 0
       let checkedInTotal = 0
 
       item.members.forEach(m => {
@@ -457,6 +484,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
         if (entry) {
           checkedInTotal++
           if (entry.purpose?.trim()) reqCount++
+          if (entry.meal_allowance) mealCount++
           const isAlcPass = isAlcoholPassed(entry.alc_result)
           const isPpePass = checkEntryPpePass(entry)
 
@@ -474,6 +502,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       item.ppeFailedCount = ppeFail
       item.missingCount = item.totalCount - checkedInTotal
       item.requestCount = reqCount
+      item.mealCount = mealCount
     })
 
     return Array.from(map.values())
@@ -611,6 +640,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setFormShirt(existingEntry.ppe_shirt ?? false)
       setFormGloves(existingEntry.ppe_gloves ?? false)
       setFormShoes(existingEntry.ppe_shoes ?? false)
+      setFormMealAllowance(!!existingEntry.meal_allowance)
       setFormPurpose(existingEntry.purpose || '')
       setIsCustomPurpose(!PURPOSE_PRESETS.includes(existingEntry.purpose || '') && !!existingEntry.purpose)
       setFormNotes(extractUserNote(existingEntry.notes))
@@ -640,12 +670,93 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       setFormShirt(false)
       setFormGloves(false)
       setFormShoes(false)
+      setFormMealAllowance(false)
       setFormPurpose('')
       setIsCustomPurpose(false)
       setFormNotes('')
     }
 
     setCurrentStep(3)
+  }
+
+  // Quick 1-Tap Toggle Meal Allowance for Contractor
+  const handleToggleMemberMeal = async (contractor: Contractor, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation()
+    const existingEntry = getEntryForContractor(contractor)
+    const nextVal = existingEntry ? !existingEntry.meal_allowance : true
+
+    if (existingEntry) {
+      try {
+        const res = await fetch(`/api/checklist/${existingEntry.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            meal_allowance: nextVal,
+          }),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error || 'อัปเดตไม่สำเร็จ')
+        }
+        toast.success(`${nextVal ? '🍱 รับข้าวกล่อง' : '❌ ยกเลิกรับข้าว'}: ${contractor.name}`)
+        await loadData(true)
+      } catch (err: any) {
+        toast.error(`อัปเดตสถานะรับข้าวไม่สำเร็จ: ${err.message}`)
+      }
+    } else {
+      // If not checked in yet, quick check-in with meal allowance
+      const compSummary = companySummaries.find(c => c.name === (contractor.company_name || selectedCompany))
+      const savedPref = contractor.id ? getContractorSavedPref(contractor.id) : null
+      const targetActId = savedPref?.activity_id || activities[0]?.id || ''
+      const tasks = getTasksForActivity(targetActId)
+      const targetActObj = activities.find(a => a.id === targetActId) || activities[0]
+      const defaultTask = (savedPref?.activity_id === targetActId ? savedPref?.activity_name : null) || tasks[0] || targetActObj?.name || ''
+      const memberWage = getContractorDailyWage(contractor)
+
+      const quickPpeDetails: Record<string, boolean> = {}
+      activePpeItems.forEach(it => { quickPpeDetails[it.id] = true })
+
+      const payload = {
+        entry_date: date,
+        contractor_id: contractor.id || null,
+        contractor_name: contractor.name,
+        company_name: contractor.company_name || selectedCompany || null,
+        supervisor: savedPref?.supervisor || formSupervisor.trim() || mobileUser?.name || currentUserSupervisor || null,
+        purpose: null,
+        activity_id: targetActId,
+        activity_name: savedPref?.activity_name || compSummary?.activityName || defaultTask,
+        location: savedPref?.location || compSummary?.location || targetActObj?.location || null,
+        check_in_time: '08:00',
+        check_out_time: '17:00',
+        alc_result: normalizeAlcForDb('0%') as ALCResult,
+        ppe_helmet: quickPpeDetails['helmet'] ?? true,
+        ppe_vest: quickPpeDetails['vest'] ?? true,
+        ppe_shirt: quickPpeDetails['glasses'] ?? quickPpeDetails['shirt'] ?? true,
+        ppe_gloves: quickPpeDetails['gloves'] ?? true,
+        ppe_shoes: quickPpeDetails['shoes'] ?? true,
+        daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : null,
+        status: 'active' as const,
+        is_blacklisted: false,
+        meal_allowance: true,
+        notes: JSON.stringify({ ppe_details: quickPpeDetails }),
+      }
+
+      try {
+        const res = await fetch('/api/checklist', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error || 'บันทึกไม่สำเร็จ')
+        }
+        toast.success(`🍱 ตรวจผ่าน & บันทึกรับข้าว: ${contractor.name}`)
+        await loadData(true)
+      } catch (err: any) {
+        toast.error(`บันทึกไม่สำเร็จ: ${err.message}`)
+      }
+    }
   }
 
   // 1-Tap Quick Pass in Step 2
@@ -685,7 +796,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
       status: 'active' as const,
       is_blacklisted: false,
-      meal_allowance: false,
+      meal_allowance: existingEntry ? !!existingEntry.meal_allowance : false,
       notes: JSON.stringify({
         ppe_details: quickPpeDetails,
         ...(extractUserNote(existingEntry?.notes) ? { user_note: extractUserNote(existingEntry?.notes) } : {}),
@@ -789,7 +900,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
       status: 'active' as const,
       is_blacklisted: false,
-      meal_allowance: false,
+      meal_allowance: !!formMealAllowance,
       notes: formPpeJson,
     }
 
@@ -878,6 +989,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
     const initialBatchPpe: Record<string, boolean> = {}
     activePpeItems.forEach(it => { initialBatchPpe[it.id] = true })
     setBatchPpeValues(initialBatchPpe)
+    setBatchMealAllowance(false)
 
     setIsBatchModalOpen(true)
   }
@@ -927,7 +1039,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
         daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : null,
         status: 'active' as const,
         is_blacklisted: false,
-        meal_allowance: false,
+        meal_allowance: mealConfig.enabled ? !!batchMealAllowance : false,
         notes: batchPpeJson,
       }
     })
@@ -1050,6 +1162,15 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                 <span className="text-emerald-700 font-bold">
                   {companySummaries.reduce((s, c) => s + c.passedCount, 0)} ผ่าน
                 </span>
+                {mealConfig.enabled && (
+                  <>
+                    <span>•</span>
+                    <span className="text-amber-800 font-bold flex items-center gap-0.5">
+                      <span>🍱</span>
+                      <span>{entries.filter(e => e.meal_allowance).length} ข้าว</span>
+                    </span>
+                  </>
+                )}
               </div>
             </div>
 
@@ -1196,6 +1317,13 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                               ขอเข้า {comp.requestCount}
                             </span>
                           )}
+
+                          {mealConfig.enabled && comp.mealCount > 0 && (
+                            <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full bg-amber-50 text-amber-900 border border-amber-300 font-semibold text-[11px]" title="ยอดรับข้าวกล่อง">
+                              <span>🍱</span>
+                              <span>ข้าว {comp.mealCount}</span>
+                            </span>
+                          )}
                         </>
                       )}
                     </div>
@@ -1336,6 +1464,19 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                 className="w-full h-9 text-xs pl-9 pr-3 py-1.5 rounded-lg border border-slate-300 bg-white focus:bg-white focus:outline-none focus:ring-1 focus:ring-blue-600 text-slate-900 font-normal placeholder:text-slate-500"
               />
             </div>
+
+            {/* Meal Allowance Team Counter (When mealConfig.enabled) */}
+            {mealConfig.enabled && (
+              <div className="flex items-center justify-between px-2.5 py-1 rounded-lg bg-amber-50/80 border border-amber-200 text-xs">
+                <span className="font-bold text-amber-950 flex items-center gap-1.5">
+                  <span>🍱</span>
+                  <span>ยอดรับข้าวกล่องในสังกัดนี้:</span>
+                </span>
+                <span className="font-mono font-bold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded border border-amber-300">
+                  {currentTeamMembers.filter(m => !!getEntryForContractor(m)?.meal_allowance).length} / {currentTeamMembers.length} กล่อง
+                </span>
+              </div>
+            )}
 
             {/* Selection Toolbar (when pending members exist and not in checked tab) */}
             {pendingMembersInTeam.length > 0 && memberStatusFilter !== 'checked' && (
@@ -1542,6 +1683,35 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                             <span className="text-blue-800 font-normal">
                               • {entry.purpose}
                             </span>
+                          )}
+
+                          {/* Meal allowance badge/toggle button */}
+                          {mealConfig.enabled && isChecked && (
+                            <button
+                              type="button"
+                              onClick={e => handleToggleMemberMeal(member, e)}
+                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1 border transition-all active:scale-95 ${
+                                entry?.meal_allowance
+                                  ? 'bg-amber-100 text-amber-950 border-amber-400 shadow-2xs'
+                                  : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200'
+                              }`}
+                              title={entry?.meal_allowance ? 'รับข้าวกล่องแล้ว (แตะเพื่อเปลี่ยน)' : 'ยังไม่ได้รับข้าว (แตะเพื่อรับข้าว)'}
+                            >
+                              <span>🍱</span>
+                              <span>{entry?.meal_allowance ? 'รับข้าว' : 'ไม่รับข้าว'}</span>
+                            </button>
+                          )}
+
+                          {mealConfig.enabled && !isChecked && (
+                            <button
+                              type="button"
+                              onClick={e => handleToggleMemberMeal(member, e)}
+                              className="px-1.5 py-0.5 rounded text-[10px] font-medium inline-flex items-center gap-0.5 border border-amber-200 bg-amber-50/70 text-amber-900 hover:bg-amber-100 transition-all active:scale-95"
+                              title="ตรวจผ่านพร้อมรับข้าวกล่องทันที"
+                            >
+                              <span>🍱</span>
+                              <span>+ข้าว</span>
+                            </button>
                           )}
                         </div>
                       </div>
@@ -1900,17 +2070,6 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                 </div>
 
                 <div className="flex items-center gap-2">
-                  {isAdmin && (
-                    <button
-                      type="button"
-                      onClick={() => setIsSettingsModalOpen(true)}
-                      className="text-xs text-slate-500 hover:text-emerald-700 font-medium flex items-center gap-0.5"
-                      title="ตั้งค่ารายการ PPE"
-                    >
-                      <Sliders className="w-3 h-3 text-emerald-600" />
-                      <span>จัดการ</span>
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => {
@@ -1974,6 +2133,50 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                 })}
               </div>
             </div>
+
+            {/* 4.5 เบี้ยเลี้ยงอาหาร / ข้าวกล่อง (Meal Allowance) */}
+            {mealConfig.enabled && (
+              <div className="bg-white p-2.5 rounded-xl border border-amber-300 shadow-2xs space-y-2 bg-gradient-to-br from-amber-50/70 via-orange-50/30 to-amber-50/50">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-xs font-bold text-amber-950">
+                    <span>🍱</span>
+                    <span>เบี้ยเลี้ยงอาหาร / ข้าวกล่อง</span>
+                  </div>
+                  <span
+                    className={`text-[11px] font-bold px-2 py-0.5 rounded border transition-colors ${
+                      formMealAllowance
+                        ? 'bg-amber-100 text-amber-900 border-amber-400'
+                        : 'bg-slate-100 text-slate-600 border-slate-300'
+                    }`}
+                  >
+                    {formMealAllowance ? '✓ รับข้าวกล่อง' : 'ไม่ได้รับ'}
+                  </span>
+                </div>
+
+                <label
+                  className={`flex items-center gap-2.5 p-2 rounded-lg border cursor-pointer transition-all ${
+                    formMealAllowance
+                      ? 'bg-amber-100/90 border-amber-400 text-amber-950 font-bold shadow-2xs'
+                      : 'bg-white border-slate-300 text-slate-700 hover:bg-slate-50'
+                  }`}
+                >
+                  <input
+                    type="checkbox"
+                    checked={formMealAllowance}
+                    onChange={e => setFormMealAllowance(e.target.checked)}
+                    className="rounded text-amber-600 focus:ring-0 w-4 h-4 shrink-0"
+                  />
+                  <div className="flex flex-col">
+                    <span className="text-xs">รับข้าวกล่อง / ค่าอาหารประจำวัน</span>
+                    <span className="text-[10px] text-amber-800 font-normal">
+                      {mealConfig.price_per_meal
+                        ? `(อัตรา ฿${mealConfig.price_per_meal} / กล่อง • นับยอดสั่งข้าวโครงการ)`
+                        : 'บันทึกยอดเพื่อรวมสั่งข้าวโครงการประจำวัน'}
+                    </span>
+                  </div>
+                </label>
+              </div>
+            )}
 
             {/* 5. Purpose & Notes */}
             <div className="bg-white p-2.5 rounded-xl border border-slate-300 shadow-2xs space-y-2.5">
@@ -2313,6 +2516,29 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                   })}
                 </div>
               </div>
+
+              {/* 7. Meal Allowance Option in Batch Modal */}
+              {mealConfig.enabled && (
+                <label className="flex items-center gap-2.5 p-2.5 rounded-xl border border-amber-300 bg-amber-50/80 text-amber-950 text-xs font-semibold cursor-pointer transition-colors hover:bg-amber-100/70">
+                  <input
+                    type="checkbox"
+                    checked={batchMealAllowance}
+                    onChange={e => setBatchMealAllowance(e.target.checked)}
+                    className="rounded text-amber-600 focus:ring-0 w-4 h-4 shrink-0"
+                  />
+                  <div className="flex flex-col">
+                    <span className="flex items-center gap-1 font-bold">
+                      <span>🍱</span>
+                      <span>บันทึกรับข้าวกล่อง / ค่าอาหาร ให้ทุกคนในกลุ่มนี้</span>
+                    </span>
+                    <span className="text-[10px] text-amber-800 font-normal">
+                      {mealConfig.price_per_meal
+                        ? `(อัตรา ฿${mealConfig.price_per_meal} / กล่อง)`
+                        : 'ยอดจะถูกนำไปรวมในรายงานสรุปสั่งข้าว'}
+                    </span>
+                  </div>
+                </label>
+              )}
             </div>
 
             {/* Modal Footer */}

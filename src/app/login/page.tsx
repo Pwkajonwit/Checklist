@@ -110,11 +110,19 @@ function LoginForm() {
       toast.error('ยังไม่ได้ตั้งค่า LIFF ID (กรุณาตั้งค่าในระบบหรือ .env.local)')
       return
     }
+
+    const isLocal = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')
+    if (isLocal) {
+      toast.info('💡 บน PC (localhost) แนะนำให้ล็อกอินด้วยเบอร์โทรโดยตรง หากต้องการใช้ LINE ให้เปิดผ่าน Domain จริงบน HTTPS')
+    }
+
     setLiffLoading(true)
     try {
       await window.liff.init({ liffId })
       if (!window.liff.isLoggedIn()) {
-        window.liff.login({ redirectUri: window.location.href })
+        // เรียก liff.login() โดยไม่ระบุ redirectUri เพื่อให้ LINE redirect ไปยัง Endpoint URL
+        // ที่ตั้งค่าไว้ใน LINE Developers Console โดยอัตโนมัติ ป้องกันปัญหา invalid url / 400 Bad Request
+        window.liff.login()
         return
       }
       const profile = await window.liff.getProfile()
@@ -374,7 +382,7 @@ function LoginForm() {
                   </div>
 
                   {/* Divider */}
-                  {LIFF_ID && (
+                  {(LIFF_ID || liffId) && (
                     <>
                       <div className="relative flex items-center justify-center my-1">
                         <div className="border-t border-slate-200 w-full" />

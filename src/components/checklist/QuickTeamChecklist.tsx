@@ -2,14 +2,15 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import type { ChecklistEntry, Contractor, Company, Activity, ALCResult, ChecklistPpeItem } from '@/lib/types'
-import { getContractorAlcRisk, getContractorDailyWage, isAlcoholPassed, isAlcoholFailed, isAlcoholUnchecked, normalizeAlcForDb, DEFAULT_CHECKLIST_PPE_ITEMS } from '@/lib/types'
+import type { ChecklistEntry, Contractor, Company, Activity, ALCResult, ChecklistPpeItem, MealConfig } from '@/lib/types'
+import { getContractorAlcRisk, getContractorDailyWage, isAlcoholPassed, isAlcoholFailed, isAlcoholUnchecked, normalizeAlcForDb, DEFAULT_CHECKLIST_PPE_ITEMS, DEFAULT_MEAL_CONFIG } from '@/lib/types'
 import { format } from 'date-fns'
 import { toast } from 'sonner'
 import {
   Building2, Users, Check, X, Plus, Search, Sparkles,
   Save, Clock, RotateCcw, Loader2, CheckCircle2, AlertTriangle, Wine, ChevronDown,
-  Smartphone, TableProperties, Zap, ChevronUp, ChevronRight, SlidersHorizontal, CheckCheck
+  Smartphone, TableProperties, Zap, ChevronUp, ChevronRight, SlidersHorizontal, CheckCheck,
+  UtensilsCrossed
 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { cleanContractorPosition } from '@/lib/types'
@@ -55,6 +56,7 @@ interface RowChecklistState {
   ppe_shirt: boolean
   ppe_gloves: boolean
   ppe_shoes: boolean
+  meal_allowance?: boolean
   ppe_details?: Record<string, boolean>
   activity_id?: string
   activity_name?: string
@@ -76,6 +78,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
 
   // ── Dynamic Checklist PPE Items ──
   const [ppeConfigItems, setPpeConfigItems] = useState<ChecklistPpeItem[]>(DEFAULT_CHECKLIST_PPE_ITEMS)
+  const [mealConfig, setMealConfig] = useState<MealConfig>(DEFAULT_MEAL_CONFIG)
 
   const loadPpeSettings = useCallback(async () => {
     try {
@@ -87,9 +90,20 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
     } catch { }
   }, [])
 
+  const loadMealSettings = useCallback(async () => {
+    try {
+      const res = await fetch('/api/settings?id=meal_config&t=' + Date.now(), { cache: 'no-store' })
+      const json = await res.json()
+      if (json.success && json.data) {
+        setMealConfig({ ...DEFAULT_MEAL_CONFIG, ...json.data })
+      }
+    } catch { }
+  }, [])
+
   useEffect(() => {
     loadPpeSettings()
-  }, [loadPpeSettings])
+    loadMealSettings()
+  }, [loadPpeSettings, loadMealSettings])
 
   const activePpeItems = useMemo(() => {
     const active = ppeConfigItems.filter(i => i.is_active)
@@ -331,6 +345,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           ppe_shirt: entry.ppe_shirt ?? false,
           ppe_gloves: entry.ppe_gloves ?? false,
           ppe_shoes: entry.ppe_shoes ?? false,
+          meal_allowance: !!entry.meal_allowance,
           ppe_details: details,
           supervisor: entry.supervisor ?? defaultSupervisor ?? currentUserSupervisor ?? undefined,
           activity_id: entry.activity_id ?? undefined,
@@ -347,6 +362,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           ppe_shirt: false,
           ppe_gloves: false,
           ppe_shoes: false,
+          meal_allowance: false,
           supervisor: defaultSupervisor || currentUserSupervisor || undefined,
           activity_id: defaultActivityId || undefined,
           activity_name: defaultActivityName || undefined,
@@ -434,6 +450,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
         ppe_shirt: false,
         ppe_gloves: false,
         ppe_shoes: false,
+        meal_allowance: false,
         supervisor: defaultSupervisor || currentUserSupervisor || undefined,
         activity_id: defaultActivityId || undefined,
         activity_name: defaultActivityName || undefined,
@@ -451,6 +468,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
         ppe_shirt: false,
         ppe_gloves: false,
         ppe_shoes: false,
+        meal_allowance: false,
         supervisor: defaultSupervisor || currentUserSupervisor || undefined,
         activity_id: defaultActivityId || undefined,
         activity_name: defaultActivityName || undefined,
@@ -544,6 +562,29 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
     })
   }
 
+  const bulkToggleMeal = () => {
+    const allChecked = currentTeamMembers.every(c => !!getRowState(c.id).meal_allowance)
+    const nextVal = !allChecked
+
+    setRowStates(prev => {
+      const updated = { ...prev }
+      currentTeamMembers.forEach(c => {
+        const cur = updated[c.id] || {
+          alc_result: '',
+          ppe_helmet: false,
+          ppe_vest: false,
+          ppe_shirt: false,
+          ppe_gloves: false,
+          ppe_shoes: false,
+          meal_allowance: false,
+        }
+        updated[c.id] = { ...cur, meal_allowance: nextVal }
+      })
+      return updated
+    })
+    toast.info(nextVal ? 'เลือกรับอาหารทุกคนแล้ว' : 'ยกเลิกรับอาหารทุกคนแล้ว')
+  }
+
   const handlePassAllTeam = () => {
     const nextDetails: Record<string, boolean> = {}
     activePpeItems.forEach(it => {
@@ -624,7 +665,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
       status: 'active' as const,
       is_blacklisted: false,
-      meal_allowance: false,
+      meal_allowance: !!st.meal_allowance,
       notes: notesStr,
     }
 
@@ -716,7 +757,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
           status: 'active' as const,
           is_blacklisted: false,
-          meal_allowance: false,
+          meal_allowance: !!st.meal_allowance,
           notes: notesStr,
         }
 
@@ -1830,6 +1871,16 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
               {/* Right: Quick Batch Actions */}
               <div className="flex items-center gap-2">
 
+                {mealConfig.enabled && (
+                  <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold">
+                    <span>🍱</span>
+                    <span>รับข้าว:</span>
+                    <span className="font-mono text-amber-950 font-extrabold">
+                      {currentTeamMembers.filter(m => !!getRowState(m.id).meal_allowance).length} / {currentTeamMembers.length}
+                    </span>
+                  </div>
+                )}
+
                 <button
                   onClick={handlePassAllTeam}
                   title="ตั้งค่าให้ทุกคนในตารางผ่านทุกข้อ"
@@ -1897,6 +1948,25 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                       </th>
                     ))}
 
+                    {/* DYNAMIC MEAL ALLOWANCE HEADER (When mealConfig.enabled === true) */}
+                    {mealConfig.enabled && (
+                      <th className="py-1.5 px-1.5 text-center min-w-[58px] font-semibold border-r border-slate-300 bg-amber-50/90">
+                        <div className="flex flex-col items-center">
+                          <span className="truncate max-w-[70px] inline-flex items-center gap-0.5 justify-center text-amber-950 font-bold" title="เบี้ยเลี้ยงอาหาร / ข้าวกล่อง">
+                            <span>🍱</span>
+                            <span>ข้าว</span>
+                          </span>
+                          <button
+                            type="button"
+                            onClick={bulkToggleMeal}
+                            className="text-xs font-normal text-amber-800 hover:text-amber-950 leading-none mt-0.5 cursor-pointer"
+                          >
+                            ทั้งหมด
+                          </button>
+                        </div>
+                      </th>
+                    )}
+
                     {/* ผลตรวจ */}
                     <th className="py-2.5 px-2 text-center min-w-[95px] font-semibold border-r border-slate-300">ผล Checklist</th>
 
@@ -1908,7 +1978,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                 <tbody>
                   {currentTeamMembers.length === 0 ? (
                     <tr>
-                      <td colSpan={14} className="py-10 text-center text-slate-500 text-xs font-normal">
+                      <td colSpan={14 + (mealConfig.enabled ? 1 : 0)} className="py-10 text-center text-slate-500 text-xs font-normal">
                         ไม่พบข้อมูลลูกทีมในสังกัดนี้
                       </td>
                     </tr>
@@ -2132,6 +2202,28 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                               </td>
                             )
                           })}
+
+                          {/* MEAL ALLOWANCE CELL (When mealConfig.enabled === true) */}
+                          {mealConfig.enabled && (
+                            <td className="py-1.5 px-1 text-center border-r border-slate-200 bg-amber-50/30">
+                              <button
+                                type="button"
+                                onClick={() => updateRow(member.id, { meal_allowance: !st.meal_allowance })}
+                                className={`w-6 h-6 rounded mx-auto border flex items-center justify-center transition-all cursor-pointer ${
+                                  st.meal_allowance
+                                    ? 'bg-amber-600 text-white border-amber-700 shadow-2xs font-bold'
+                                    : 'bg-white text-slate-300 border-slate-300 hover:border-amber-500 hover:text-amber-500'
+                                }`}
+                                title={`เบี้ยเลี้ยงอาหาร: ${st.meal_allowance ? 'รับข้าว/เบิก' : 'ไม่ได้รับ (คลิกเพื่อเลือก)'}`}
+                              >
+                                {st.meal_allowance ? (
+                                  <Check className="w-4 h-4 stroke-[3]" />
+                                ) : (
+                                  <span className="text-[10px] select-none opacity-60">🍱</span>
+                                )}
+                              </button>
+                            </td>
+                          )}
 
                           {/* ผลตรวจ (PPE ผ่านกี่ชิ้น) */}
                           <td className="py-1.5 px-2 text-center border-r border-slate-200">

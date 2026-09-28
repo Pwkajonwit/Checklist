@@ -1,13 +1,21 @@
 import { promises as fs } from 'fs'
 import path from 'path'
 import { createServiceClient } from '@/lib/supabase/service'
-import { ChecklistPpeItem, DEFAULT_CHECKLIST_PPE_ITEMS, NotificationConfig, DEFAULT_NOTIFICATION_CONFIG } from '@/lib/types'
+import {
+  ChecklistPpeItem,
+  DEFAULT_CHECKLIST_PPE_ITEMS,
+  NotificationConfig,
+  DEFAULT_NOTIFICATION_CONFIG,
+  MealConfig,
+  DEFAULT_MEAL_CONFIG,
+} from '@/lib/types'
 
 const SETTINGS_FILE = path.join(process.cwd(), 'data', 'settings.json')
 
 interface SettingsData {
   checklist_ppe_items?: ChecklistPpeItem[]
   notification_config?: NotificationConfig
+  meal_config?: MealConfig
   [key: string]: any
 }
 
@@ -24,6 +32,7 @@ async function readLocalSettings(): Promise<SettingsData> {
     return {
       checklist_ppe_items: DEFAULT_CHECKLIST_PPE_ITEMS,
       notification_config: DEFAULT_NOTIFICATION_CONFIG,
+      meal_config: DEFAULT_MEAL_CONFIG,
     }
   }
 }
@@ -138,4 +147,56 @@ export async function saveNotificationConfig(cfg: Partial<NotificationConfig>): 
 
   return merged
 }
+
+// ── Get Meal Allowance Config ──
+export async function getMealConfig(): Promise<MealConfig> {
+  try {
+    const supabase = createServiceClient()
+    const { data, error } = await supabase
+      .from('settings')
+      .select('data')
+      .eq('id', 'meal_config')
+      .maybeSingle()
+
+    if (!error && data && data.data && typeof data.data === 'object') {
+      return { ...DEFAULT_MEAL_CONFIG, ...data.data } as MealConfig
+    }
+  } catch (err) {
+    // Supabase error, fallback to local
+  }
+
+  const local = await readLocalSettings()
+  if (local.meal_config && typeof local.meal_config === 'object') {
+    return { ...DEFAULT_MEAL_CONFIG, ...local.meal_config }
+  }
+
+  return DEFAULT_MEAL_CONFIG
+}
+
+// ── Save Meal Allowance Config ──
+export async function saveMealConfig(cfg: Partial<MealConfig>): Promise<MealConfig> {
+  const merged: MealConfig = { ...DEFAULT_MEAL_CONFIG, ...cfg }
+
+  // 1. Save to local fallback first
+  const current = await readLocalSettings()
+  current.meal_config = merged
+  await writeLocalSettings(current)
+
+  // 2. Try saving to Supabase settings table
+  try {
+    const supabase = createServiceClient()
+    await supabase
+      .from('settings')
+      .upsert({
+        id: 'meal_config',
+        data: merged,
+        updated_at: new Date().toISOString(),
+      })
+  } catch (err) {
+    console.warn('[settings-store] Supabase upsert meal_config error:', err)
+  }
+
+  return merged
+}
+
 

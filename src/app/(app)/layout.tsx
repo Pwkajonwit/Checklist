@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { getSession } from '@/lib/session'
 import { AppHeader } from '@/components/layout'
+import { SchedulerHeartbeat } from '@/components/SchedulerHeartbeat'
 import type { UserRole } from '@/lib/types'
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -26,6 +27,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           {children}
         </main>
       </div>
+      <SchedulerHeartbeat />
     </div>
   )
 }

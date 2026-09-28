@@ -4,13 +4,21 @@ import {
   savePpeChecklistItems,
   getNotificationConfig,
   saveNotificationConfig,
+  getMealConfig,
+  saveMealConfig,
 } from '@/lib/settings-store'
-import { DEFAULT_CHECKLIST_PPE_ITEMS, ChecklistPpeItem, DEFAULT_NOTIFICATION_CONFIG } from '@/lib/types'
+import {
+  DEFAULT_CHECKLIST_PPE_ITEMS,
+  ChecklistPpeItem,
+  DEFAULT_NOTIFICATION_CONFIG,
+  MealConfig,
+  DEFAULT_MEAL_CONFIG,
+} from '@/lib/types'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-// GET /api/settings?id=checklist_ppe_items | notification_config
+// GET /api/settings?id=checklist_ppe_items | notification_config | meal_config
 export async function GET(req: Request) {
   try {
     const { searchParams } = new URL(req.url)
@@ -26,6 +34,14 @@ export async function GET(req: Request) {
 
     if (id === 'notification_config') {
       const config = await getNotificationConfig()
+      return NextResponse.json({
+        success: true,
+        data: config,
+      })
+    }
+
+    if (id === 'meal_config') {
+      const config = await getMealConfig()
       return NextResponse.json({
         success: true,
         data: config,
@@ -65,6 +81,24 @@ export async function POST(req: Request) {
       return NextResponse.json({
         success: true,
         message: 'บันทึกการตั้งค่าการแจ้งเตือนเรียบร้อยแล้ว',
+        data: saved,
+      })
+    }
+
+    if (id === 'meal_config') {
+      if (reset) {
+        const saved = await saveMealConfig(DEFAULT_MEAL_CONFIG)
+        return NextResponse.json({
+          success: true,
+          message: 'รีเซ็ตการตั้งค่าค่าอาหารเป็นค่าเริ่มต้นเรียบร้อยแล้ว',
+          data: saved,
+        })
+      }
+
+      const saved = await saveMealConfig(config || body)
+      return NextResponse.json({
+        success: true,
+        message: 'บันทึกการตั้งค่าค่าอาหารและข้าวกล่องเรียบร้อยแล้ว',
         data: saved,
       })
     }
