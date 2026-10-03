@@ -108,3 +108,31 @@ export async function POST(req: Request) {
     { status: 201 }
   )
 }
+
+// PATCH /api/checklist (Batch update entries by IDs)
+export async function PATCH(req: Request) {
+  try {
+    const body = await req.json()
+    const { ids, updates } = body
+
+    if (!Array.isArray(ids) || ids.length === 0) {
+      return NextResponse.json({ error: 'ids array required' }, { status: 400 })
+    }
+
+    if (!updates || typeof updates !== 'object') {
+      return NextResponse.json({ error: 'updates object required' }, { status: 400 })
+    }
+
+    const supabase = createServiceClient()
+    const { data, error } = await supabase
+      .from('checklist_entries')
+      .update(updates)
+      .in('id', ids)
+      .select()
+
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+    return NextResponse.json({ success: true, count: data?.length ?? 0, data })
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message }, { status: 500 })
+  }
+}

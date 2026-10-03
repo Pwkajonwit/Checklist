@@ -20,9 +20,7 @@ export default function HistoryPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table')
-  const [dateFrom, setDateFrom] = useState(
-    format(subDays(new Date(), 7), 'yyyy-MM-dd')
-  )
+  const [dateFrom, setDateFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [dateTo, setDateTo] = useState(format(new Date(), 'yyyy-MM-dd'))
 
   const fetchEntries = useCallback(async () => {
@@ -54,9 +52,13 @@ export default function HistoryPage() {
     }
   }
 
-  const setPresetRange = (type: '7d' | '30d' | 'thisMonth') => {
+  const setPresetRange = (type: 'today' | '7d' | '30d' | 'thisMonth') => {
     const now = new Date()
-    if (type === '7d') {
+    if (type === 'today') {
+      const todayStr = format(now, 'yyyy-MM-dd')
+      setDateFrom(todayStr)
+      setDateTo(todayStr)
+    } else if (type === '7d') {
       setDateFrom(format(subDays(now, 7), 'yyyy-MM-dd'))
       setDateTo(format(now, 'yyyy-MM-dd'))
     } else if (type === '30d') {
@@ -105,6 +107,12 @@ export default function HistoryPage() {
 
           {/* Quick presets */}
           <div className="hidden sm:flex items-center gap-1 text-[11px]">
+            <button
+              onClick={() => setPresetRange('today')}
+              className="px-2 py-0.5 rounded border border-slate-200 hover:bg-slate-100 text-slate-600"
+            >
+              วันนี้
+            </button>
             <button
               onClick={() => setPresetRange('7d')}
               className="px-2 py-0.5 rounded border border-slate-200 hover:bg-slate-100 text-slate-600"
