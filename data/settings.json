@@ -43,17 +43,28 @@
   ],
   "notification_config": {
     "line_enabled": true,
-    "line_channel_access_token": "",
+    "line_channel_access_token": "40g5uZi5s3LubFjK6rBbqcVfKVonfZ9TkP8HIhxoDat/ZOnfBKfg/YXoC+YMZKpuhdB2LQg5ubBEiMqC+IRnv+1uh37ktV8M/XwY5WQXQKCFsxZFsGvjSz904OSpTNnZ/xE+vyJsM2oP6JTjfmh7NwdB04t89/1O/w1cDnyilFU=",
     "line_target_id": "",
-    "line_broadcast": false,
+    "line_broadcast": true,
+    "line_liff_id": "",
     "telegram_enabled": false,
     "telegram_bot_token": "",
     "telegram_chat_id": "",
     "schedule_enabled": true,
     "schedule_times": [
-      "09:00"
+      "11:28"
     ],
     "schedule_mode": "flex",
     "cron_secret": "sitecheck-cron-secret"
+  },
+  "meal_config": {
+    "enabled": true,
+    "price_per_meal": 60,
+    "allow_ot_dinner": false,
+    "ot_price_per_meal": 70,
+    "cut_off_time": "10:00",
+    "catering_shop_name": "",
+    "catering_phone": "",
+    "line_notify_template": "🍱 สรุปยอดสั่งข้าวกล่อง โครงการ\nประจำวันที่: {date}\nรวมทั้งหมด: {total} กล่อง\n{breakdown}\n\nกรุณาส่งก่อน 11:45 น. ขอบคุณครับ"
   }
 }
