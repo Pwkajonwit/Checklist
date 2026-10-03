@@ -23,11 +23,9 @@ export function MobileHistoryView({ onOpenAuth, mobileUser }: MobileHistoryViewP
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [search, setSearch] = useState('')
-  const [preset, setPreset] = useState<'today' | '7d' | '30d' | 'thisMonth'>('7d')
+  const [preset, setPreset] = useState<'today' | '7d' | '30d' | 'thisMonth'>('today')
   
-  const [dateFrom, setDateFrom] = useState(
-    format(subDays(new Date(), 7), 'yyyy-MM-dd')
-  )
+  const [dateFrom, setDateFrom] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [dateTo, setDateTo] = useState(format(new Date(), 'yyyy-MM-dd'))
 
   const fetchEntries = useCallback(async (isSilent = false) => {

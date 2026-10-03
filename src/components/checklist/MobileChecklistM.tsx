@@ -31,7 +31,7 @@ import {
   MapPin, Briefcase, User, Save, RefreshCw, Zap, ArrowLeft,
   Check, X, FileText, ChevronDown, Plus, Sparkles, Building2,
   Users, CheckCircle, MessageSquare, Phone, Monitor, RotateCcw,
-  Sliders, Send
+  Sliders, Send, Loader2
 } from 'lucide-react'
 import { PpeSettingsModal } from '@/components/checklist/PpeSettingsModal'
 import { extractUserNote } from '@/lib/utils'
@@ -243,6 +243,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
   const [mealConfig, setMealConfig] = useState<MealConfig>(DEFAULT_MEAL_CONFIG)
   const [formMealAllowance, setFormMealAllowance] = useState(false)
   const [batchMealAllowance, setBatchMealAllowance] = useState(false)
+  const [isUpdatingAllMeals, setIsUpdatingAllMeals] = useState(false)
 
   const loadMealSettings = useCallback(async () => {
     try {
@@ -756,6 +757,51 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       } catch (err: any) {
         toast.error(`บันทึกไม่สำเร็จ: ${err.message}`)
       }
+    }
+  }
+
+  // Toggle all meals for checked contractors in current team
+  const handleToggleAllMeals = async () => {
+    const checkedEntries = currentTeamMembers
+      .map(m => getEntryForContractor(m))
+      .filter((e): e is ChecklistEntry => !!e && !!e.id)
+
+    if (checkedEntries.length === 0) {
+      toast.warning('ยังไม่มีผู้ที่ตรวจแล้วในสังกัดนี้')
+      return
+    }
+
+    const currentMealCount = checkedEntries.filter(e => !!e.meal_allowance).length
+    const isAllReceived = currentMealCount === checkedEntries.length
+    const targetVal = !isAllReceived
+
+    setIsUpdatingAllMeals(true)
+    try {
+      const ids = checkedEntries.map(e => e.id)
+      const res = await fetch('/api/checklist', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ids,
+          updates: { meal_allowance: targetVal },
+        }),
+      })
+
+      if (!res.ok) {
+        const errJson = await res.json()
+        throw new Error(errJson.error || 'อัปเดตไม่สำเร็จ')
+      }
+
+      toast.success(
+        targetVal
+          ? `🍱 บันทึกรับข้าวกล่องทั้งหมดแล้ว (${checkedEntries.length} คน)`
+          : `❌ ยกเลิกรับข้าวกล่องทั้งหมดแล้ว (${checkedEntries.length} คน)`
+      )
+      await loadData(true)
+    } catch (err: any) {
+      toast.error(`เกิดข้อผิดพลาด: ${err.message}`)
+    } finally {
+      setIsUpdatingAllMeals(false)
     }
   }
 
@@ -1465,18 +1511,49 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
               />
             </div>
 
-            {/* Meal Allowance Team Counter (When mealConfig.enabled) */}
-            {mealConfig.enabled && (
-              <div className="flex items-center justify-between px-2.5 py-1 rounded-lg bg-amber-50/80 border border-amber-200 text-xs">
-                <span className="font-bold text-amber-950 flex items-center gap-1.5">
-                  <span>🍱</span>
-                  <span>ยอดรับข้าวกล่องในสังกัดนี้:</span>
-                </span>
-                <span className="font-mono font-bold text-amber-900 bg-amber-100/90 px-2 py-0.5 rounded border border-amber-300">
-                  {currentTeamMembers.filter(m => !!getEntryForContractor(m)?.meal_allowance).length} / {currentTeamMembers.length} กล่อง
-                </span>
-              </div>
-            )}
+            {/* Meal Allowance Team Counter (Only shown in 'checked' tab) */}
+            {mealConfig.enabled && memberStatusFilter === 'checked' && (() => {
+              const checkedEntries = currentTeamMembers
+                .map(m => getEntryForContractor(m))
+                .filter((e): e is ChecklistEntry => !!e)
+              const mealCount = checkedEntries.filter(e => !!e.meal_allowance).length
+              const totalChecked = checkedEntries.length
+              const isAllReceived = totalChecked > 0 && mealCount === totalChecked
+
+              return (
+                <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-amber-50/80 border border-amber-200 text-xs gap-2">
+                  <span className="font-bold text-amber-950 flex items-center gap-1.5 min-w-0 truncate">
+                    <span>🍱</span>
+                    <span className="truncate">ยอดรับข้าวกล่องในสังกัดนี้:</span>
+                  </span>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button
+                      type="button"
+                      onClick={handleToggleAllMeals}
+                      disabled={isUpdatingAllMeals || totalChecked === 0}
+                      className={`h-7 px-2.5 rounded-md font-bold text-xs flex items-center gap-1 transition-all active:scale-95 shadow-2xs cursor-pointer ${
+                        isAllReceived
+                          ? 'bg-amber-200/90 text-amber-950 border border-amber-400 hover:bg-amber-300'
+                          : 'bg-amber-600 hover:bg-amber-700 text-white border border-amber-700'
+                      }`}
+                      title={isAllReceived ? 'คลิกเพื่อยกเลิกรับข้าวทุกคน' : 'คลิกเพื่อบันทึกรับข้าวกล่องให้ทุกคนที่ตรวจแล้ว'}
+                    >
+                      {isUpdatingAllMeals ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      ) : (
+                        <span>🍱</span>
+                      )}
+                      <span>{isAllReceived ? 'ยกเลิกทั้งหมด' : 'รับทั้งหมด'}</span>
+                    </button>
+
+                    <span className="font-mono font-bold text-amber-900 bg-amber-100/90 px-2 py-1 rounded border border-amber-300">
+                      {mealCount} / {totalChecked} กล่อง
+                    </span>
+                  </div>
+                </div>
+              )
+            })()}
 
             {/* Selection Toolbar (when pending members exist and not in checked tab) */}
             {pendingMembersInTeam.length > 0 && memberStatusFilter !== 'checked' && (
@@ -1629,34 +1706,36 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                           <span className="font-semibold text-sm text-slate-950 truncate">
                             {member.name}
                           </span>
-                          {isAlcRisk && (
+                          {!isChecked && isAlcRisk && (
                             <span className="px-1.5 py-0.2 rounded bg-amber-100 text-amber-950 border border-amber-300 text-xs font-bold">
                               เสี่ยง ALC
                             </span>
                           )}
 
-                          {/* Call contractor button */}
-                          {member.phone ? (
-                            <a
-                              href={`tel:${member.phone}`}
-                              onClick={e => e.stopPropagation()}
-                              className="w-6 h-6 rounded-full bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 flex items-center justify-center transition-all active:scale-90 shadow-2xs shrink-0"
-                              title={`โทรหา ${member.name} (${member.phone})`}
-                            >
-                              <Phone className="w-3 h-3 text-sky-600" />
-                            </a>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={e => {
-                                e.stopPropagation()
-                                toast.info(`ช่าง ${member.name} ยังไม่มีเบอร์โทรในระบบ`)
-                              }}
-                              className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 border border-slate-200 flex items-center justify-center transition-all active:scale-90 shrink-0"
-                              title="ไม่มีเบอร์โทรในระบบ"
-                            >
-                              <Phone className="w-3 h-3 text-slate-400" />
-                            </button>
+                          {/* Call contractor button (แสดงเฉพาะคนที่ยังไม่ตรวจ เพื่อโทรตามตัว) */}
+                          {!isChecked && (
+                            member.phone ? (
+                              <a
+                                href={`tel:${member.phone}`}
+                                onClick={e => e.stopPropagation()}
+                                className="w-6 h-6 rounded-full bg-sky-50 hover:bg-sky-100 text-sky-700 border border-sky-300 flex items-center justify-center transition-all active:scale-90 shadow-2xs shrink-0"
+                                title={`โทรหา ${member.name} (${member.phone})`}
+                              >
+                                <Phone className="w-3 h-3 text-sky-600" />
+                              </a>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={e => {
+                                  e.stopPropagation()
+                                  toast.info(`ช่าง ${member.name} ยังไม่มีเบอร์โทรในระบบ`)
+                                }}
+                                className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 border border-slate-200 flex items-center justify-center transition-all active:scale-90 shrink-0"
+                                title="ไม่มีเบอร์โทรในระบบ"
+                              >
+                                <Phone className="w-3 h-3 text-slate-400" />
+                              </button>
+                            )
                           )}
                         </div>
 
@@ -1690,29 +1769,18 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                             <button
                               type="button"
                               onClick={e => handleToggleMemberMeal(member, e)}
-                              className={`px-1.5 py-0.5 rounded text-[10px] font-bold inline-flex items-center gap-1 border transition-all active:scale-95 ${
+                              className={`px-2.5 py-1 rounded-md text-xs font-bold inline-flex items-center gap-1.5 border transition-all active:scale-95 shadow-2xs ${
                                 entry?.meal_allowance
-                                  ? 'bg-amber-100 text-amber-950 border-amber-400 shadow-2xs'
-                                  : 'bg-slate-100 text-slate-500 border-slate-300 hover:bg-slate-200'
+                                  ? 'bg-amber-100 text-amber-950 border-amber-400 hover:bg-amber-200/80 ring-1 ring-amber-300/60'
+                                  : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
                               }`}
                               title={entry?.meal_allowance ? 'รับข้าวกล่องแล้ว (แตะเพื่อเปลี่ยน)' : 'ยังไม่ได้รับข้าว (แตะเพื่อรับข้าว)'}
                             >
-                              <span>🍱</span>
+                              <span className="text-xs">🍱</span>
                               <span>{entry?.meal_allowance ? 'รับข้าว' : 'ไม่รับข้าว'}</span>
                             </button>
                           )}
 
-                          {mealConfig.enabled && !isChecked && (
-                            <button
-                              type="button"
-                              onClick={e => handleToggleMemberMeal(member, e)}
-                              className="px-1.5 py-0.5 rounded text-[10px] font-medium inline-flex items-center gap-0.5 border border-amber-200 bg-amber-50/70 text-amber-900 hover:bg-amber-100 transition-all active:scale-95"
-                              title="ตรวจผ่านพร้อมรับข้าวกล่องทันที"
-                            >
-                              <span>🍱</span>
-                              <span>+ข้าว</span>
-                            </button>
-                          )}
                         </div>
                       </div>
                     </div>
