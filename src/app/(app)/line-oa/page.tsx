@@ -73,7 +73,6 @@ export default function LineOAPage() {
     serverBangkokTime: string
   } | null>(null)
   const [testingTrigger, setTestingTrigger] = useState(false)
-  const [copiedWebhook, setCopiedWebhook] = useState(false)
 
   // Fetch live server scheduler diagnostics
   const fetchSchedulerStatus = useCallback(async () => {
@@ -163,6 +162,7 @@ export default function LineOAPage() {
         throw new Error(errJson.error || 'บันทึกลงฐานข้อมูล Supabase ไม่สำเร็จ')
       }
       toast.success('บันทึกการตั้งค่าการแจ้งเตือนและรอบเวลาลง Supabase เรียบร้อยแล้ว')
+      await fetchSchedulerStatus()
     } catch (err: any) {
       console.error('Save notification config error:', err)
       toast.warning('บันทึกเฉพาะในเบราว์เซอร์ (Supabase บันทึกไม่สำเร็จ: ' + (err.message || '') + ')')
@@ -271,7 +271,7 @@ export default function LineOAPage() {
     for (const t of sorted) {
       const [h, m] = t.split(':').map(Number)
       const slotMins = h * 60 + m
-      if (slotMins > currentMins) {
+      if (slotMins >= currentMins) {
         return t
       }
     }
@@ -525,7 +525,18 @@ export default function LineOAPage() {
           <Button
             size="sm"
             variant="outline"
-            onClick={() => setConfigOpen(true)}
+            onClick={() => {
+              fetch('/api/settings?id=notification_config')
+                .then(r => r.json())
+                .then(res => {
+                  if (res.data && typeof res.data === 'object') {
+                    setConfig(prev => ({ ...prev, ...res.data }))
+                  }
+                })
+                .catch(() => {})
+              fetchSchedulerStatus()
+              setConfigOpen(true)
+            }}
             className="h-8 text-xs border-slate-300 text-slate-800 bg-white hover:bg-slate-50 gap-1.5 font-bold shadow-2xs"
           >
             <Settings className="w-3.5 h-3.5 text-slate-700" />
@@ -1380,6 +1391,12 @@ export default function LineOAPage() {
                         type="time"
                         value={newTimeInput}
                         onChange={e => setNewTimeInput(e.target.value)}
+                        onKeyDown={e => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault()
+                            handleAddTimeSlot()
+                          }
+                        }}
                         className="h-8 text-xs font-bold w-28 bg-white border-slate-300"
                       />
                       <Button
@@ -1460,34 +1477,6 @@ export default function LineOAPage() {
                   </div>
                 </div>
 
-                {/* Cloud Cron / Webhook URL Card */}
-                <div className="p-3 rounded-lg border border-slate-200 bg-slate-50 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                      <Code className="w-3.5 h-3.5 text-slate-600" />
-                      <span>Webhook URL สำหรับ Supabase pg_cron / Cloud Cron</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const url = typeof window !== 'undefined'
-                          ? `${window.location.origin}/api/line/cron?secret=${config.cron_secret || 'sitecheck-cron-secret'}`
-                          : `/api/line/cron?secret=${config.cron_secret || 'sitecheck-cron-secret'}`
-                        navigator.clipboard.writeText(url)
-                        setCopiedWebhook(true)
-                        toast.success('คัดลอก Webhook URL เรียบร้อย')
-                        setTimeout(() => setCopiedWebhook(false), 2000)
-                      }}
-                      className="text-[11px] text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1"
-                    >
-                      {copiedWebhook ? <Check className="w-3 h-3 text-emerald-600" /> : <Copy className="w-3 h-3" />}
-                      <span>{copiedWebhook ? 'คัดลอกแล้ว' : 'คัดลอก URL'}</span>
-                    </button>
-                  </div>
-                  <div className="p-1.5 bg-white border border-slate-300 rounded font-mono text-[11px] text-slate-600 break-all select-all">
-                    /api/line/cron?secret={config.cron_secret || 'sitecheck-cron-secret'}
-                  </div>
-                </div>
               </div>
             )}
           </div>
@@ -1534,7 +1523,12 @@ export default function LineOAPage() {
                 type="button"
                 size="sm"
                 onClick={async () => {
-                  await saveConfig(config)
+                  let updated = { ...config }
+                  // If user typed a time in the input and didn't click "เพิ่มเวลา", automatically include it!
+                  if (newTimeInput && !updated.schedule_times.includes(newTimeInput)) {
+                    updated.schedule_times = [...updated.schedule_times, newTimeInput].sort()
+                  }
+                  await saveConfig(updated)
                   setConfigOpen(false)
                 }}
                 disabled={savingSettings}

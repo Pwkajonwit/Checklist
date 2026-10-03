@@ -171,7 +171,7 @@ export async function getSchedulerDiagnostics() {
   // Find next upcoming slot today or tomorrow
   let nextSlot: string | null = null
   for (const s of sortedSlots) {
-    if (s > timeStr) {
+    if (s >= timeStr) {
       nextSlot = s
       break
     }

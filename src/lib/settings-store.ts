@@ -23,7 +23,6 @@ interface SettingsData {
 let memoryCache: SettingsData | null = null
 
 async function readLocalSettings(): Promise<SettingsData> {
-  if (memoryCache) return memoryCache
   try {
     const raw = await fs.readFile(SETTINGS_FILE, 'utf-8')
     memoryCache = JSON.parse(raw)
