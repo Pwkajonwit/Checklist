@@ -52,7 +52,8 @@
     "telegram_chat_id": "",
     "schedule_enabled": true,
     "schedule_times": [
-      "11:28"
+      "08:50",
+      "10:30"
     ],
     "schedule_mode": "flex",
     "cron_secret": "sitecheck-cron-secret"
