@@ -3,8 +3,20 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
-import type { Contractor, Company } from '@/lib/types'
-import { getContractorAlcRisk, getContractorDailyWage, cleanContractorPosition } from '@/lib/types'
+import type { Contractor, Company, ContractorDocuments } from '@/lib/types'
+import {
+  getContractorAlcRisk,
+  getContractorDailyWage,
+  cleanContractorPosition,
+  getContractorCertifications,
+  getContractorDocuments,
+  getTrainingExpiryStatus,
+  getDocumentStats,
+  formatContractorPositionPayload,
+  REQUIRED_DOCUMENT_LIST,
+  DEFAULT_CONTRACTOR_DOCUMENTS,
+} from '@/lib/types'
+import { formatDateDisplay } from '@/lib/utils'
 
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,7 +28,9 @@ import {
 import { Checkbox } from '@/components/ui/checkbox'
 import {
   HardHat, Phone, Plus, Pencil, Trash2, Search,
-  Loader2, RefreshCw, ChevronDown, CheckCircle2, XCircle, AlertTriangle, Coins
+  Loader2, RefreshCw, ChevronDown, CheckCircle2, XCircle,
+  AlertTriangle, Coins, Award, FileText, Check, X,
+  IdCard, Home, Stethoscope, ShieldCheck
 } from 'lucide-react'
 
 interface ContractorFormData {
@@ -29,6 +43,9 @@ interface ContractorFormData {
   daily_wage: string
   alc_risk: boolean
   is_active: boolean
+  insee_training_exp: string
+  boomlift_training_exp: string
+  documents: ContractorDocuments
 }
 
 const defaultForm: ContractorFormData = {
@@ -41,6 +58,9 @@ const defaultForm: ContractorFormData = {
   daily_wage: '',
   alc_risk: false,
   is_active: true,
+  insee_training_exp: '',
+  boomlift_training_exp: '',
+  documents: { ...DEFAULT_CONTRACTOR_DOCUMENTS },
 }
 
 // Quick presets for common construction & technician roles
@@ -57,6 +77,15 @@ const POSITION_PRESETS = [
   'ช่างทั่วไป',
 ]
 
+// Icon mapping for required documents
+const DOC_ICONS: Record<string, typeof IdCard> = {
+  id_card: IdCard,
+  house_reg: Home,
+  medical_cert: Stethoscope,
+  social_security: ShieldCheck,
+  consent_form: FileText,
+}
+
 export default function ContractorsPage() {
   const supabase = useMemo(() => createClient(), [])
   const [contractors, setContractors] = useState<Contractor[]>([])
@@ -68,6 +97,7 @@ export default function ContractorsPage() {
   const [search, setSearch] = useState('')
   const [companyFilter, setCompanyFilter] = useState<string>('all')
   const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'inactive'>('all')
+  const [complianceFilter, setComplianceFilter] = useState<'all' | 'certs_warning' | 'docs_incomplete' | 'docs_complete'>('all')
 
   // Dialog State
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -118,7 +148,27 @@ export default function ContractorsPage() {
     const inactive = total - active
     const withCompany = technicianList.filter(c => !!c.company_name).length
     const alcRiskCount = technicianList.filter(c => getContractorAlcRisk(c)).length
-    return { total, active, inactive, withCompany, alcRiskCount }
+
+    let certsWarningCount = 0
+    let docsIncompleteCount = 0
+
+    technicianList.forEach(c => {
+      const certs = getContractorCertifications(c)
+      const insee = getTrainingExpiryStatus(certs.insee_training_exp)
+      const boom = getTrainingExpiryStatus(certs.boomlift_training_exp)
+      if (insee.status === 'expired' || insee.status === 'expiring_soon' ||
+          boom.status === 'expired' || boom.status === 'expiring_soon') {
+        certsWarningCount++
+      }
+
+      const docs = getContractorDocuments(c)
+      const docStat = getDocumentStats(docs)
+      if (!docStat.isComplete) {
+        docsIncompleteCount++
+      }
+    })
+
+    return { total, active, inactive, withCompany, alcRiskCount, certsWarningCount, docsIncompleteCount }
   }, [contractors])
 
   // Filtered List (เอาพนักงานประจำออก)
@@ -129,6 +179,24 @@ export default function ContractorsPage() {
         // Status filter
         if (statusFilter === 'active' && !c.is_active) return false
         if (statusFilter === 'inactive' && c.is_active) return false
+
+        // Compliance filter
+        if (complianceFilter === 'certs_warning') {
+          const certs = getContractorCertifications(c)
+          const insee = getTrainingExpiryStatus(certs.insee_training_exp)
+          const boom = getTrainingExpiryStatus(certs.boomlift_training_exp)
+          const hasWarning = insee.status === 'expired' || insee.status === 'expiring_soon' ||
+                             boom.status === 'expired' || boom.status === 'expiring_soon'
+          if (!hasWarning) return false
+        } else if (complianceFilter === 'docs_incomplete') {
+          const docs = getContractorDocuments(c)
+          const docStat = getDocumentStats(docs)
+          if (docStat.isComplete) return false
+        } else if (complianceFilter === 'docs_complete') {
+          const docs = getContractorDocuments(c)
+          const docStat = getDocumentStats(docs)
+          if (!docStat.isComplete) return false
+        }
 
         // Company filter
         if (companyFilter !== 'all' && c.company_id !== companyFilter) return false
@@ -145,12 +213,15 @@ export default function ContractorsPage() {
 
         return true
       })
-  }, [contractors, statusFilter, companyFilter, search])
+  }, [contractors, statusFilter, complianceFilter, companyFilter, search])
 
   // Open Create Dialog
   const openCreate = () => {
     setEditId(null)
-    setFormData(defaultForm)
+    setFormData({
+      ...defaultForm,
+      documents: { ...DEFAULT_CONTRACTOR_DOCUMENTS },
+    })
     setDialogOpen(true)
   }
 
@@ -158,6 +229,8 @@ export default function ContractorsPage() {
   const openEdit = (c: Contractor) => {
     setEditId(c.id)
     const wage = getContractorDailyWage(c)
+    const certs = getContractorCertifications(c)
+    const docs = getContractorDocuments(c)
     setFormData({
       name: c.name,
       company_id: c.company_id ?? '',
@@ -168,6 +241,9 @@ export default function ContractorsPage() {
       daily_wage: wage ? String(wage) : '',
       alc_risk: getContractorAlcRisk(c),
       is_active: c.is_active,
+      insee_training_exp: certs.insee_training_exp ?? '',
+      boomlift_training_exp: certs.boomlift_training_exp ?? '',
+      documents: docs,
     })
     setDialogOpen(true)
   }
@@ -192,31 +268,26 @@ export default function ContractorsPage() {
     const wageNum = formData.daily_wage ? parseFloat(formData.daily_wage) : null
     const cleanPos = formData.position.trim()
     
-    // Construct position with embedded tags if DB columns don't exist
-    let embeddedPos = cleanPos
-    if (formData.alc_risk) embeddedPos += ' [เสี่ยง ALC]'
-    if (wageNum) embeddedPos += ` [ค่าแรง:${wageNum}]`
+    // Construct position with embedded tags so it works whether DB has columns or not
+    const embeddedPos = formatContractorPositionPayload(cleanPos, {
+      dailyWage: wageNum,
+      alcRisk: formData.alc_risk,
+      certifications: {
+        insee_training_exp: formData.insee_training_exp || null,
+        boomlift_training_exp: formData.boomlift_training_exp || null,
+      },
+      documents: formData.documents,
+    })
 
     const payloadWithColumns: any = {
       name: formData.name.trim(),
       company_id: formData.company_id || null,
       company_name: formData.company_name.trim() || null,
       employee_type: 'contractor',
-      position: cleanPos || null,
+      position: embeddedPos || cleanPos || null,
       phone: formData.phone.trim() || null,
       daily_wage: wageNum,
       alc_risk: formData.alc_risk,
-      is_active: formData.is_active,
-      updated_at: new Date().toISOString(),
-    }
-
-    const payloadFallback: any = {
-      name: formData.name.trim(),
-      company_id: formData.company_id || null,
-      company_name: formData.company_name.trim() || null,
-      employee_type: 'contractor',
-      position: embeddedPos.trim() || null,
-      phone: formData.phone.trim() || null,
       is_active: formData.is_active,
       updated_at: new Date().toISOString(),
     }
@@ -289,65 +360,153 @@ export default function ContractorsPage() {
     }
   }
 
+  // Document Helpers inside dialog
+  const dialogDocStats = useMemo(() => {
+    return getDocumentStats(formData.documents)
+  }, [formData.documents])
+
+  const toggleAllDocs = () => {
+    if (dialogDocStats.isComplete) {
+      // Clear all
+      setFormData(prev => ({
+        ...prev,
+        documents: { ...DEFAULT_CONTRACTOR_DOCUMENTS },
+      }))
+    } else {
+      // Set all 5 to true
+      setFormData(prev => ({
+        ...prev,
+        documents: {
+          id_card: true,
+          house_reg: true,
+          medical_cert: true,
+          social_security: true,
+          consent_form: true,
+        },
+      }))
+    }
+  }
+
+  const toggleDoc = (docId: keyof ContractorDocuments) => {
+    setFormData(prev => ({
+      ...prev,
+      documents: {
+        ...prev.documents,
+        [docId]: !prev.documents[docId],
+      },
+    }))
+  }
+
+  const setDocValue = (docId: keyof ContractorDocuments, val: boolean) => {
+    setFormData(prev => ({
+      ...prev,
+      documents: {
+        ...prev.documents,
+        [docId]: val,
+      },
+    }))
+  }
+
+  const inseeDialogStatus = useMemo(() => {
+    return getTrainingExpiryStatus(formData.insee_training_exp)
+  }, [formData.insee_training_exp])
+
+  const boomliftDialogStatus = useMemo(() => {
+    return getTrainingExpiryStatus(formData.boomlift_training_exp)
+  }, [formData.boomlift_training_exp])
+
   return (
     <div className="flex flex-col flex-1 min-h-0 h-full gap-2 overflow-hidden">
-      {/* ── Compact Top Controls Bar ── */}
+      {/* ── Compact Top Controls Bar (Standardized h-9) ── */}
       <div className="p-2 bg-white rounded-lg border border-slate-300 shadow-2xs flex flex-wrap items-center justify-between gap-2 shrink-0">
         
         {/* Left: Title & Quick Status Filter Badges */}
         <div className="flex items-center gap-1.5 flex-wrap">
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded bg-amber-50 text-amber-800 text-xs font-bold border border-amber-200">
-            <HardHat className="w-3.5 h-3.5 text-amber-600" />
+          <div className="h-9 flex items-center gap-1.5 px-3 rounded-md bg-amber-50 text-amber-950 text-xs font-bold border border-amber-300 shrink-0">
+            <HardHat className="w-4 h-4 text-amber-700" />
             <span>จัดการช่าง / ผู้รับเหมา</span>
           </div>
 
-          {/* Quick status tabs */}
-          <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded border border-slate-200 text-xs">
+          {/* Quick status tabs (h-9 container) */}
+          <div className="h-9 flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-md border border-slate-300 text-xs shrink-0">
             <button
               onClick={() => setStatusFilter('all')}
-              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all ${
+              className={`h-full px-2.5 rounded text-[11px] font-semibold transition-all ${
                 statusFilter === 'all'
-                  ? 'bg-white text-slate-800 shadow-2xs'
-                  : 'text-slate-600 hover:text-slate-900'
+                  ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
+                  : 'text-slate-700 hover:text-slate-950'
               }`}
             >
-              ทั้งหมด ({stats.total})
+              ทั้งหมด (<span className="font-bold">{stats.total}</span>)
             </button>
             <button
               onClick={() => setStatusFilter('active')}
-              className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all flex items-center gap-1 ${
+              className={`h-full px-2.5 rounded text-[11px] font-semibold transition-all flex items-center gap-1 ${
                 statusFilter === 'active'
                   ? 'bg-emerald-600 text-white shadow-2xs'
-                  : 'text-emerald-700 hover:text-emerald-900'
+                  : 'text-emerald-800 hover:text-emerald-950'
               }`}
             >
-              <CheckCircle2 className="w-3 h-3" />
-              พร้อมปฏิบัติงาน ({stats.active})
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              <span>พร้อมงาน (<span className="font-bold">{stats.active}</span>)</span>
             </button>
             {stats.inactive > 0 && (
               <button
                 onClick={() => setStatusFilter('inactive')}
-                className={`px-2 py-0.5 rounded text-[11px] font-semibold transition-all flex items-center gap-1 ${
+                className={`h-full px-2.5 rounded text-[11px] font-semibold transition-all flex items-center gap-1 ${
                   statusFilter === 'inactive'
                     ? 'bg-slate-700 text-white shadow-2xs'
-                    : 'text-slate-500 hover:text-slate-800'
+                    : 'text-slate-700 hover:text-slate-950'
                 }`}
               >
-                <XCircle className="w-3 h-3" />
-                ปิด ({stats.inactive})
+                <XCircle className="w-3.5 h-3.5" />
+                <span>ปิด (<span className="font-bold">{stats.inactive}</span>)</span>
               </button>
             )}
           </div>
+
+          {/* Compliance filter chips (h-9) */}
+          <div className="flex items-center gap-1 shrink-0">
+            <button
+              onClick={() => setComplianceFilter(prev => prev === 'certs_warning' ? 'all' : 'certs_warning')}
+              className={`h-9 px-2.5 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1.5 border ${
+                complianceFilter === 'certs_warning'
+                  ? 'bg-rose-600 text-white border-rose-700 shadow-2xs'
+                  : stats.certsWarningCount > 0
+                  ? 'bg-rose-50 text-rose-900 border-rose-300 hover:bg-rose-100'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+              }`}
+              title="กรองเฉพาะคนที่ใบเซอร์ Insee/Boomlift หมดอายุหรือใกล้หมด"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-rose-600" />
+              <span>ใบเซอร์เตือน (<span className="font-bold">{stats.certsWarningCount}</span>)</span>
+            </button>
+
+            <button
+              onClick={() => setComplianceFilter(prev => prev === 'docs_incomplete' ? 'all' : 'docs_incomplete')}
+              className={`h-9 px-2.5 rounded-md text-[11px] font-semibold transition-all flex items-center gap-1.5 border ${
+                complianceFilter === 'docs_incomplete'
+                  ? 'bg-amber-600 text-white border-amber-700 shadow-2xs'
+                  : stats.docsIncompleteCount > 0
+                  ? 'bg-amber-50 text-amber-950 border-amber-300 hover:bg-amber-100'
+                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+              }`}
+              title="กรองเฉพาะคนที่เอกสาร 5 รายการยังไม่ครบ"
+            >
+              <FileText className="w-3.5 h-3.5 text-amber-700" />
+              <span>เอกสารไม่ครบ (<span className="font-bold">{stats.docsIncompleteCount}</span>)</span>
+            </button>
+          </div>
         </div>
 
-        {/* Right: Company Select + Search + Refresh + Add */}
+        {/* Right: Company Select + Search + Refresh + Add (All h-9) */}
         <div className="flex items-center gap-1.5 ml-auto flex-wrap">
-          {/* Company filter */}
+          {/* Company filter (h-9) */}
           <div className="relative">
             <select
               value={companyFilter}
               onChange={e => setCompanyFilter(e.target.value)}
-              className="text-xs h-7 pl-2 pr-6 rounded border border-slate-300 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer"
+              className="h-9 text-xs pl-2.5 pr-7 rounded-md border border-slate-300 bg-white text-slate-900 font-normal focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer"
             >
               <option value="all">ทุกสังกัด / บริษัท</option>
               {companies.map(co => (
@@ -356,38 +515,38 @@ export default function ContractorsPage() {
                 </option>
               ))}
             </select>
-            <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-1.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <ChevronDown className="w-3.5 h-3.5 text-slate-500 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none" />
           </div>
 
-          {/* Search box */}
+          {/* Search box (h-9) */}
           <div className="relative w-44 sm:w-56">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
             <input
               type="search"
               placeholder="ค้นหาชื่อ, ตำแหน่ง, เบอร์..."
               value={search}
               onChange={e => setSearch(e.target.value)}
-              className="w-full text-xs pl-8 pr-2.5 py-1 rounded border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500"
+              className="w-full h-9 text-xs pl-8 pr-2.5 rounded-md border border-slate-300 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-amber-500 text-slate-900 font-normal placeholder-slate-500"
             />
           </div>
 
-          {/* Refresh button */}
+          {/* Refresh button (h-9 w-9) */}
           <button
             onClick={() => fetchData(true)}
             disabled={refreshing || loading}
-            className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors disabled:opacity-50"
+            className="w-9 h-9 flex items-center justify-center rounded-md border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 transition-colors disabled:opacity-50"
             title="รีเฟรชข้อมูล"
           >
             <RefreshCw className={`w-3.5 h-3.5 ${refreshing || loading ? 'animate-spin' : ''}`} />
           </button>
 
-          {/* Add button */}
+          {/* Add button (h-9) */}
           <Button
             size="sm"
             onClick={openCreate}
-            className="h-7 px-2.5 text-xs bg-amber-600 hover:bg-amber-700 text-white font-medium shadow-2xs gap-1"
+            className="h-9 px-3.5 text-xs bg-amber-600 hover:bg-amber-700 text-white font-semibold shadow-2xs gap-1.5"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-4 h-4" />
             <span>เพิ่มช่าง</span>
           </Button>
         </div>
@@ -396,15 +555,15 @@ export default function ContractorsPage() {
       {/* ── Table Container (Spreadsheet Grid) ── */}
       <div className="border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs flex-1 min-h-0 flex flex-col h-full">
         {loading ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-400">
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-600">
             <Loader2 className="w-6 h-6 animate-spin text-amber-600" />
-            <span className="text-xs">กำลังโหลดข้อมูลช่าง...</span>
+            <span className="text-xs font-normal">กำลังโหลดข้อมูลช่าง...</span>
           </div>
         ) : filteredList.length === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-400 p-4">
-            <HardHat className="w-8 h-8 stroke-1 text-slate-300" />
-            <span className="text-xs font-medium text-slate-500">
-              {search || companyFilter !== 'all' || statusFilter !== 'all'
+          <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-600 p-4">
+            <HardHat className="w-8 h-8 stroke-1 text-slate-400" />
+            <span className="text-xs font-semibold text-slate-800">
+              {search || companyFilter !== 'all' || statusFilter !== 'all' || complianceFilter !== 'all'
                 ? 'ไม่พบข้อมูลที่ตรงกับเงื่อนไขการค้นหา'
                 : 'ยังไม่มีข้อมูลช่างในระบบ'}
             </span>
@@ -412,7 +571,7 @@ export default function ContractorsPage() {
               size="sm"
               variant="outline"
               onClick={openCreate}
-              className="h-7 text-xs border-amber-300 text-amber-700 hover:bg-amber-50"
+              className="h-9 px-3 text-xs border-amber-300 text-amber-900 hover:bg-amber-50 font-semibold"
             >
               <Plus className="w-3.5 h-3.5 mr-1" /> เพิ่มช่างคนแรก
             </Button>
@@ -422,15 +581,27 @@ export default function ContractorsPage() {
             <table className="w-full text-left border-collapse">
               <thead className="sticky top-0 bg-slate-100 z-10 select-none">
                 <tr className="text-[11px] font-bold text-slate-900 border-b border-slate-300">
-                  <th className="py-2 px-2.5 text-center w-12 border-r border-slate-300">#</th>
-                  <th className="py-2 px-3 border-r border-slate-300">ชื่อ - นามสกุล</th>
-                  <th className="py-2 px-3 border-r border-slate-300">สังกัด / บริษัท</th>
-                  <th className="py-2 px-3 border-r border-slate-300">ตำแหน่ง / ความชำนาญ</th>
-                  <th className="py-2 px-3 text-right border-r border-slate-300">ค่าแรง (บาท/วัน)</th>
-                  <th className="py-2 px-3 text-center border-r border-slate-300">ความเสี่ยง ALC</th>
-                  <th className="py-2 px-3 border-r border-slate-300">เบอร์ติดต่อ</th>
-                  <th className="py-2 px-3 text-center min-w-[130px] border-r border-slate-300 whitespace-nowrap">สถานะ</th>
-                  <th className="py-2 px-2.5 text-center w-20">จัดการ</th>
+                  <th className="py-2 px-2.5 text-center w-10 border-r border-slate-300">#</th>
+                  <th className="py-2 px-3 border-r border-slate-300 min-w-[170px]">ชื่อ - นามสกุล</th>
+                  <th className="py-2 px-3 border-r border-slate-300 min-w-[130px]">สังกัด / บริษัท</th>
+                  <th className="py-2 px-3 border-r border-slate-300 min-w-[120px]">ตำแหน่ง / ช่าง</th>
+                  <th className="py-2 px-3 border-r border-slate-300 min-w-[160px]">
+                    <div className="flex items-center gap-1">
+                      <Award className="w-3.5 h-3.5 text-amber-700" />
+                      <span>ใบเซอร์ / อบรม</span>
+                    </div>
+                  </th>
+                  <th className="py-2 px-3 border-r border-slate-300 min-w-[160px]">
+                    <div className="flex items-center gap-1">
+                      <FileText className="w-3.5 h-3.5 text-blue-700" />
+                      <span>เอกสาร (5 รายการ)</span>
+                    </div>
+                  </th>
+                  <th className="py-2 px-3 text-right border-r border-slate-300 w-24">ค่าแรง</th>
+                  <th className="py-2 px-3 text-center border-r border-slate-300 w-24">ความเสี่ยง ALC</th>
+                  <th className="py-2 px-3 border-r border-slate-300 w-28">เบอร์ติดต่อ</th>
+                  <th className="py-2 px-3 text-center w-28 border-r border-slate-300 whitespace-nowrap">สถานะ</th>
+                  <th className="py-2 px-2.5 text-center w-16">จัดการ</th>
                 </tr>
               </thead>
               <tbody className="text-xs divide-y divide-slate-200">
@@ -438,12 +609,18 @@ export default function ContractorsPage() {
                   const hasAlcRisk = getContractorAlcRisk(c)
                   const wage = getContractorDailyWage(c)
                   const displayPosition = cleanContractorPosition(c.position)
+                  const certs = getContractorCertifications(c)
+                  const docs = getContractorDocuments(c)
+                  const docStat = getDocumentStats(docs)
+
+                  const inseeStatus = getTrainingExpiryStatus(certs.insee_training_exp)
+                  const boomStatus = getTrainingExpiryStatus(certs.boomlift_training_exp)
 
                   return (
                     <tr
                       key={c.id}
                       className={`hover:bg-amber-50/40 transition-colors ${
-                        !c.is_active ? 'bg-slate-50/70 text-slate-400' : 'text-slate-800'
+                        !c.is_active ? 'bg-slate-50/70 text-slate-500' : 'text-slate-900'
                       }`}
                     >
                       {/* Index */}
@@ -457,13 +634,13 @@ export default function ContractorsPage() {
                           <div
                             className={`w-6 h-6 rounded-md flex items-center justify-center font-bold text-[11px] shrink-0 ${
                               !c.is_active
-                                ? 'bg-slate-200 text-slate-600'
-                                : 'bg-amber-100 text-amber-800'
+                                ? 'bg-slate-200 text-slate-700'
+                                : 'bg-amber-100 text-amber-900'
                             }`}
                           >
                             {c.name.trim().charAt(0) || '?'}
                           </div>
-                          <span className={c.is_active ? 'text-slate-950 font-normal' : 'text-slate-500 font-normal'}>
+                          <span className={c.is_active ? 'text-slate-950 font-normal' : 'text-slate-600 font-normal'}>
                             {c.name}
                           </span>
                         </div>
@@ -472,56 +649,163 @@ export default function ContractorsPage() {
                       {/* Company */}
                       <td className="py-1.5 px-3 border-r border-slate-200 font-normal">
                         {c.company_name ? (
-                          <span className="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-800 border border-slate-300 text-[11px] font-normal">
+                          <span className="inline-block px-1.5 py-0.5 rounded bg-slate-100 text-slate-900 border border-slate-300 text-[11px] font-normal">
                             {c.company_name}
                           </span>
                         ) : (
-                          <span className="text-slate-500 text-[11px] italic">รับจ้างอิสระ</span>
+                          <span className="text-slate-600 text-[11px] italic font-normal">รับจ้างอิสระ</span>
                         )}
                       </td>
 
                       {/* Position */}
                       <td className="py-1.5 px-3 border-r border-slate-200">
-                        <span className="font-normal text-slate-800">
+                        <span className="font-normal text-slate-900">
                           {displayPosition || '-'}
                         </span>
                       </td>
 
-                      {/* Wage */}
-                      <td className="py-1.5 px-3 border-r border-slate-200 text-right font-mono text-[11px]">
-                        {wage ? (
-                          <span className="font-semibold text-slate-950">฿{wage.toLocaleString()}</span>
+                      {/* Certifications (Insee & Boomlift) */}
+                      <td className="py-1.5 px-3 border-r border-slate-200">
+                        <div className="flex flex-col gap-1">
+                          {/* Insee */}
+                          {certs.insee_training_exp ? (
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                title={
+                                  inseeStatus.status === 'expiring_soon'
+                                    ? `หมดอายุวันที่ ${formatDateDisplay(certs.insee_training_exp)} (เหลืออีก ${inseeStatus.daysLeft} วัน)`
+                                    : inseeStatus.status === 'expired'
+                                    ? `หมดอายุแล้วเมื่อ ${formatDateDisplay(certs.insee_training_exp)}`
+                                    : `หมดอายุวันที่ ${formatDateDisplay(certs.insee_training_exp)}`
+                                }
+                                className={`text-[11px] px-1.5 py-0.5 rounded font-normal inline-flex items-center gap-1 border ${
+                                  inseeStatus.status === 'expired'
+                                    ? 'bg-rose-100 text-rose-950 border-rose-300 font-semibold'
+                                    : inseeStatus.status === 'expiring_soon'
+                                    ? 'bg-amber-100 text-amber-950 border-amber-300 font-semibold'
+                                    : 'bg-emerald-50 text-emerald-950 border-emerald-300'
+                                }`}
+                              >
+                                {inseeStatus.status === 'expired' && <AlertTriangle className="w-3 h-3 text-rose-700" />}
+                                {inseeStatus.status === 'expiring_soon' && <AlertTriangle className="w-3 h-3 text-amber-700" />}
+                                {inseeStatus.status === 'valid' && <Check className="w-3 h-3 text-emerald-700" />}
+                                <span>
+                                  Insee: {
+                                    inseeStatus.status === 'expired'
+                                      ? 'หมดอายุแล้ว'
+                                      : inseeStatus.status === 'expiring_soon'
+                                      ? `ใกล้หมดอายุ (${inseeStatus.daysLeft} วัน)`
+                                      : formatDateDisplay(certs.insee_training_exp)
+                                  }
+                                </span>
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-500 font-normal">Insee: —</span>
+                          )}
+
+                          {/* Boomlift */}
+                          {certs.boomlift_training_exp ? (
+                            <div className="flex items-center gap-1.5">
+                              <span
+                                title={
+                                  boomStatus.status === 'expiring_soon'
+                                    ? `หมดอายุวันที่ ${formatDateDisplay(certs.boomlift_training_exp)} (เหลืออีก ${boomStatus.daysLeft} วัน)`
+                                    : boomStatus.status === 'expired'
+                                    ? `หมดอายุแล้วเมื่อ ${formatDateDisplay(certs.boomlift_training_exp)}`
+                                    : `หมดอายุวันที่ ${formatDateDisplay(certs.boomlift_training_exp)}`
+                                }
+                                className={`text-[11px] px-1.5 py-0.5 rounded font-normal inline-flex items-center gap-1 border ${
+                                  boomStatus.status === 'expired'
+                                    ? 'bg-rose-100 text-rose-950 border-rose-300 font-semibold'
+                                    : boomStatus.status === 'expiring_soon'
+                                    ? 'bg-amber-100 text-amber-950 border-amber-300 font-semibold'
+                                    : 'bg-blue-50 text-blue-950 border-blue-300'
+                                }`}
+                              >
+                                {boomStatus.status === 'expired' && <AlertTriangle className="w-3 h-3 text-rose-700" />}
+                                {boomStatus.status === 'expiring_soon' && <AlertTriangle className="w-3 h-3 text-amber-700" />}
+                                {boomStatus.status === 'valid' && <Check className="w-3 h-3 text-blue-700" />}
+                                <span>
+                                  Boomlift: {
+                                    boomStatus.status === 'expired'
+                                      ? 'หมดอายุแล้ว'
+                                      : boomStatus.status === 'expiring_soon'
+                                      ? `ใกล้หมดอายุ (${boomStatus.daysLeft} วัน)`
+                                      : formatDateDisplay(certs.boomlift_training_exp)
+                                  }
+                                </span>
+                              </span>
+                            </div>
+                          ) : (
+                            <span className="text-[11px] text-slate-500 font-normal">Boomlift: —</span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Required Documents (5 Items) */}
+                      <td className="py-1.5 px-3 border-r border-slate-200">
+                        {docStat.isComplete ? (
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-950 border border-emerald-300 font-bold text-[11px] inline-flex items-center gap-1">
+                            <Check className="w-3 h-3 text-emerald-700" />
+                            ได้ครบ 5/5
+                          </span>
+                        ) : docStat.completedCount === 0 ? (
+                          <span className="px-2 py-0.5 rounded-full bg-rose-50 text-rose-900 border border-rose-300 text-[11px] font-normal inline-flex items-center gap-1">
+                            <X className="w-3 h-3 text-rose-600" />
+                            ยังขาด 5 รายการ
+                          </span>
                         ) : (
-                          <span className="text-slate-400">—</span>
+                          <div className="flex flex-col gap-0.5">
+                            <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-300 font-semibold text-[11px] inline-flex items-center gap-1 w-fit">
+                              <AlertTriangle className="w-3 h-3 text-amber-700" />
+                              ขาด {docStat.missingItems.length} อย่าง ({docStat.completedCount}/5)
+                            </span>
+                            <span
+                              className="text-[11px] text-slate-700 font-normal truncate max-w-[160px]"
+                              title={docStat.missingItems.map(m => m.label).join(', ')}
+                            >
+                              ขาด: {docStat.missingItems.map(m => m.shortLabel).join(', ')}
+                            </span>
+                          </div>
+                        )}
+                      </td>
+
+                      {/* Wage */}
+                      <td className="py-1.5 px-3 border-r border-slate-200 text-right text-[11px]">
+                        {wage ? (
+                          <span className="font-bold text-slate-950">฿{wage.toLocaleString()}</span>
+                        ) : (
+                          <span className="text-slate-500 font-normal">—</span>
                         )}
                       </td>
 
                       {/* ALC Risk */}
                       <td className="py-1.5 px-3 border-r border-slate-200 text-center">
                         {hasAlcRisk ? (
-                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 font-bold text-[10px] inline-flex items-center gap-1">
+                          <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-950 border border-amber-300 font-bold text-[11px] inline-flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3 text-amber-700" />
                             เสี่ยง ALC
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200 text-[10px] font-medium">
+                          <span className="px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-900 border border-emerald-300 text-[11px] font-normal">
                             ✓ ปกติ
                           </span>
                         )}
                       </td>
 
                       {/* Phone */}
-                      <td className="py-1.5 px-3 border-r border-slate-200 font-mono text-[11px]">
+                      <td className="py-1.5 px-3 border-r border-slate-200 text-[11px]">
                         {c.phone ? (
                           <a
                             href={`tel:${c.phone}`}
-                            className="text-blue-700 hover:underline flex items-center gap-1 font-normal"
+                            className="text-blue-800 hover:underline flex items-center gap-1 font-normal"
                           >
-                            <Phone className="w-3 h-3 text-slate-500" />
+                            <Phone className="w-3 h-3 text-slate-600" />
                             <span>{c.phone}</span>
                           </a>
                         ) : (
-                          <span className="text-slate-400 italic text-[11px]">—</span>
+                          <span className="text-slate-500 italic text-[11px] font-normal">—</span>
                         )}
                       </td>
 
@@ -529,10 +813,10 @@ export default function ContractorsPage() {
                       <td className="py-1.5 px-3 text-center border-r border-slate-200 whitespace-nowrap">
                         <button
                           onClick={() => handleToggleActive(c)}
-                          className={`inline-flex items-center justify-center text-[11px] font-medium px-2.5 py-0.5 rounded-full cursor-pointer transition-colors whitespace-nowrap border ${
+                          className={`inline-flex items-center justify-center text-[11px] font-semibold px-2.5 py-0.5 rounded-full cursor-pointer transition-colors whitespace-nowrap border ${
                             c.is_active
-                              ? 'bg-emerald-100 text-emerald-900 border-emerald-400 hover:bg-emerald-200'
-                              : 'bg-slate-200 text-slate-800 border-slate-400 hover:bg-slate-300'
+                              ? 'bg-emerald-100 text-emerald-950 border-emerald-400 hover:bg-emerald-200'
+                              : 'bg-slate-200 text-slate-900 border-slate-400 hover:bg-slate-300'
                           }`}
                           title="คลิกเพื่อสลับสถานะ"
                         >
@@ -545,14 +829,14 @@ export default function ContractorsPage() {
                         <div className="flex items-center justify-center gap-1">
                           <button
                             onClick={() => openEdit(c)}
-                            className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 text-slate-500 hover:text-blue-600 transition-colors"
+                            className="w-6 h-6 flex items-center justify-center rounded hover:bg-slate-100 text-slate-700 hover:text-blue-700 transition-colors"
                             title="แก้ไขข้อมูล"
                           >
                             <Pencil className="w-3.5 h-3.5" />
                           </button>
                           <button
                             onClick={() => handleDelete(c.id, c.name)}
-                            className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-50 text-slate-400 hover:text-red-600 transition-colors"
+                            className="w-6 h-6 flex items-center justify-center rounded hover:bg-red-50 text-slate-600 hover:text-red-700 transition-colors"
                             title="ลบ"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
@@ -568,221 +852,456 @@ export default function ContractorsPage() {
         )}
 
         {/* ── Table Footer ── */}
-        <div className="px-3 py-1.5 bg-slate-50 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500 shrink-0">
+        <div className="px-3 py-2 bg-slate-50 border-t border-slate-200 flex flex-wrap items-center justify-between text-[11px] text-slate-700 shrink-0 gap-2">
           <div>
-            แสดง <span className="font-semibold text-slate-700">{filteredList.length}</span> จากทั้งหมด{' '}
-            <span className="font-semibold text-slate-700">{stats.total}</span> คน
+            แสดง <span className="font-bold text-slate-950">{filteredList.length}</span> จากทั้งหมด{' '}
+            <span className="font-bold text-slate-950">{stats.total}</span> คน
             {companyFilter !== 'all' && ' (กรองตามบริษัท)'}
+            {complianceFilter === 'certs_warning' && ' (กรองใบเซอร์เตือน)'}
+            {complianceFilter === 'docs_incomplete' && ' (กรองเอกสารไม่ครบ)'}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap font-normal">
+            <span className="flex items-center gap-1 text-slate-900 font-semibold">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
+              พร้อมงาน <span className="font-bold">{stats.active}</span> คน
+            </span>
             {stats.alcRiskCount > 0 && (
-              <span className="flex items-center gap-1 text-amber-900 font-semibold">
-                <AlertTriangle className="w-3 h-3 text-amber-600" />
-                กลุ่มเสี่ยง ALC {stats.alcRiskCount} คน
+              <span className="flex items-center gap-1 text-amber-950 font-semibold">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
+                กลุ่มเสี่ยง ALC <span className="font-bold">{stats.alcRiskCount}</span> คน
               </span>
             )}
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block" />
-              พร้อมงาน {stats.active} คน
-            </span>
-            <span className="flex items-center gap-1">
-              <span className="w-2 h-2 rounded-full bg-slate-400 inline-block" />
-              ปิดใช้งาน {stats.inactive} คน
-            </span>
+            {stats.certsWarningCount > 0 && (
+              <span className="flex items-center gap-1 text-rose-950 font-semibold">
+                <Award className="w-3.5 h-3.5 text-rose-700" />
+                ใบเซอร์เตือน <span className="font-bold">{stats.certsWarningCount}</span> คน
+              </span>
+            )}
+            {stats.docsIncompleteCount > 0 && (
+              <span className="flex items-center gap-1 text-amber-950 font-semibold">
+                <FileText className="w-3.5 h-3.5 text-amber-700" />
+                เอกสารยังไม่ครบ <span className="font-bold">{stats.docsIncompleteCount}</span> คน
+              </span>
+            )}
           </div>
         </div>
       </div>
 
-      {/* ── Dialog: Add & Edit Contractor / Technician ── */}
+      {/* ── Add / Edit Contractor Modal Dialog ── */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-md p-5 bg-white rounded-xl shadow-xl border border-slate-200">
-          <DialogHeader className="pb-2.5 border-b border-slate-100">
+        <DialogContent className="max-w-xl sm:max-w-2xl max-h-[92vh] flex flex-col p-0 overflow-hidden bg-white border border-slate-300 shadow-xl">
+          <DialogHeader className="px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0">
             <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold shrink-0 bg-amber-100 text-amber-700">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center font-bold shrink-0 bg-amber-100 text-amber-800">
                 <HardHat className="w-4 h-4" />
               </div>
               <div>
                 <DialogTitle className="text-sm font-bold text-slate-900">
                   {editId ? 'แก้ไขข้อมูลช่าง / ผู้รับเหมา' : 'เพิ่มข้อมูลช่าง / ผู้รับเหมา'}
                 </DialogTitle>
-                <p className="text-[11px] text-slate-500 mt-0.5">
-                  ระบุข้อมูลช่างสำหรับตรวจเช็คชื่อและ PPE หน้างาน
+                <p className="text-[11px] text-slate-700 mt-0.5 font-normal">
+                  บันทึกข้อมูลส่วนตัว ใบเซอร์การอบรม และเช็คความครบถ้วนของเอกสาร
                 </p>
               </div>
             </div>
           </DialogHeader>
 
-          <div className="space-y-3 py-2 text-xs">
-            {/* Name */}
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold text-slate-700">ชื่อ - นามสกุล *</Label>
-              <Input
-                value={formData.name}
-                onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
-                placeholder="เช่น นายสมชาย ใจดี"
-                className="h-8 text-xs bg-white border-slate-300 font-medium text-slate-900"
-                autoFocus
-              />
-            </div>
+          {/* Scrollable Form Body */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs scrollbar-thin">
+            
+            {/* ── Section: ข้อมูลพื้นฐาน ── */}
+            <div className="space-y-3 bg-slate-50/70 p-3 rounded-lg border border-slate-300">
+              <div className="text-[11px] font-bold text-slate-900 uppercase tracking-wide">
+                ข้อมูลพื้นฐาน
+              </div>
 
-            {/* Company / Department */}
-            <div className="space-y-1">
-              <Label htmlFor="modal_company" className="text-xs font-semibold text-slate-700">
-                สังกัด / บริษัท
-              </Label>
-              <div className="relative">
-                <select
-                  id="modal_company"
-                  value={formData.company_id || ''}
-                  onChange={e => handleCompanySelect(e.target.value || '__none__')}
-                  className="w-full h-8 px-2.5 pr-8 rounded-md border border-slate-300 bg-white text-xs font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer"
-                >
-                  <option value="">-- ไม่ระบุ / รับจ้างอิสระ --</option>
-                  {companies.map(co => (
-                    <option key={co.id} value={co.id}>
-                      {co.name}
-                    </option>
+              {/* Name */}
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-slate-900">ชื่อ - นามสกุล *</Label>
+                <Input
+                  value={formData.name}
+                  onChange={e => setFormData(prev => ({ ...prev, name: e.target.value }))}
+                  placeholder="เช่น นายสมชาย ใจดี"
+                  className="h-9 text-xs bg-white border-slate-300 font-normal text-slate-900"
+                  autoFocus
+                />
+              </div>
+
+              {/* Company / Department */}
+              <div className="space-y-1">
+                <Label htmlFor="modal_company" className="text-xs font-semibold text-slate-900">
+                  สังกัด / บริษัท
+                </Label>
+                <div className="relative">
+                  <select
+                    id="modal_company"
+                    value={formData.company_id || ''}
+                    onChange={e => handleCompanySelect(e.target.value || '__none__')}
+                    className="w-full h-9 px-2.5 pr-8 rounded-md border border-slate-300 bg-white text-xs font-normal text-slate-900 focus:outline-none focus:ring-1 focus:ring-amber-500 appearance-none cursor-pointer"
+                  >
+                    <option value="">-- ไม่ระบุ / รับจ้างอิสระ --</option>
+                    {companies.map(co => (
+                      <option key={co.id} value={co.id}>
+                        {co.name}
+                      </option>
+                    ))}
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-500 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Position with quick preset chips */}
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold text-slate-900">
+                  ตำแหน่ง / สายงานช่าง
+                </Label>
+                <Input
+                  value={formData.position}
+                  onChange={e => setFormData(prev => ({ ...prev, position: e.target.value }))}
+                  placeholder="เช่น ช่างไฟฟ้า, ช่างเชื่อม..."
+                  className="h-9 text-xs bg-white border-slate-300 text-slate-900 font-normal"
+                />
+                <div className="flex flex-wrap gap-1 pt-1">
+                  {POSITION_PRESETS.map(preset => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => setFormData(prev => ({ ...prev, position: preset }))}
+                      className={`text-[11px] px-2 py-0.5 rounded border transition-all cursor-pointer ${
+                        formData.position === preset
+                          ? 'bg-amber-600 border-amber-600 text-white font-semibold'
+                          : 'bg-white border-slate-300 text-slate-800 hover:bg-slate-100 font-normal'
+                      }`}
+                    >
+                      + {preset}
+                    </button>
                   ))}
-                </select>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                </div>
+              </div>
+
+              {/* Wage & Phone in 2 Columns */}
+              <div className="grid grid-cols-2 gap-2">
+                {/* Daily Wage */}
+                <div className="space-y-1">
+                  <Label className="text-xs font-semibold text-slate-900 flex items-center gap-1">
+                    <Coins className="w-3.5 h-3.5 text-amber-700" />
+                    ค่าแรง (บาท/วัน)
+                  </Label>
+                  <Input
+                    value={formData.daily_wage}
+                    onChange={e => setFormData(prev => ({ ...prev, daily_wage: e.target.value }))}
+                    placeholder="เช่น 500"
+                    className="h-9 text-xs bg-white border-slate-300 text-slate-900 font-normal"
+                    type="number"
+                    min="0"
+                  />
+                </div>
+
+                {/* Phone */}
+                <div className="space-y-1">
+                  <Label htmlFor="contractor_phone" className="text-xs font-semibold text-slate-900 flex items-center gap-1">
+                    <Phone className="w-3.5 h-3.5 text-amber-700" />
+                    เบอร์โทรศัพท์ / ติดต่อ
+                  </Label>
+                  <Input
+                    id="contractor_phone"
+                    value={formData.phone}
+                    onChange={e => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                    placeholder="เช่น 081-234-5678"
+                    className="h-9 text-xs bg-white border-slate-300 text-slate-900 font-normal"
+                    type="tel"
+                    inputMode="tel"
+                  />
+                </div>
+              </div>
+
+              {/* ALC Risk & Active in 2 Columns */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                {/* ALC Risk Toggle */}
+                <label
+                  htmlFor="modal_alc_risk"
+                  className="flex items-center justify-between p-2.5 rounded-lg border border-amber-300 bg-amber-50 hover:bg-amber-100/60 cursor-pointer transition-all"
+                >
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="modal_alc_risk"
+                      checked={formData.alc_risk}
+                      onCheckedChange={v => setFormData(prev => ({ ...prev, alc_risk: !!v }))}
+                    />
+                    <div>
+                      <p className="text-xs font-semibold text-amber-950 flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
+                        เสี่ยง ALC
+                      </p>
+                      <p className="text-[11px] text-amber-900 font-normal">เตือนแถบเหลืองในตาราง</p>
+                    </div>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={
+                      formData.alc_risk
+                        ? 'bg-amber-200 text-amber-950 border-amber-400 text-[11px] font-bold'
+                        : 'bg-white text-slate-700 border-slate-300 text-[11px] font-normal'
+                    }
+                  >
+                    {formData.alc_risk ? 'เสี่ยง' : 'ปกติ'}
+                  </Badge>
+                </label>
+
+                {/* Active Toggle */}
+                <label
+                  htmlFor="modal_is_active"
+                  className="flex items-center justify-between p-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100/80 cursor-pointer transition-all"
+                >
+                  <div className="flex items-center gap-2">
+                    <Checkbox
+                      id="modal_is_active"
+                      checked={formData.is_active}
+                      onCheckedChange={v => setFormData(prev => ({ ...prev, is_active: !!v }))}
+                    />
+                    <div>
+                      <p className="text-xs font-semibold text-slate-900">เปิดใช้งาน (Active)</p>
+                      <p className="text-[11px] text-slate-600 font-normal">แสดงใน Checklist หน้างาน</p>
+                    </div>
+                  </div>
+                  <Badge
+                    variant="outline"
+                    className={
+                      formData.is_active
+                        ? 'bg-emerald-100 text-emerald-900 border-emerald-300 text-[11px] font-semibold'
+                        : 'bg-slate-100 text-slate-700 text-[11px] font-normal'
+                    }
+                  >
+                    {formData.is_active ? 'Active' : 'Inactive'}
+                  </Badge>
+                </label>
               </div>
             </div>
 
-            {/* Position with quick preset chips */}
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold text-slate-700">
-                ตำแหน่ง / สายงานช่าง
-              </Label>
-              <Input
-                value={formData.position}
-                onChange={e => setFormData(prev => ({ ...prev, position: e.target.value }))}
-                placeholder="เช่น ช่างไฟฟ้า, ช่างเชื่อม..."
-                className="h-8 text-xs bg-white border-slate-300 text-slate-900"
-              />
-              <div className="flex flex-wrap gap-1 pt-0.5">
-                {POSITION_PRESETS.map(preset => (
-                  <button
-                    key={preset}
-                    type="button"
-                    onClick={() => setFormData(prev => ({ ...prev, position: preset }))}
-                    className={`text-[10px] px-2 py-0.5 rounded border transition-all cursor-pointer ${
-                      formData.position === preset
-                        ? 'bg-amber-600 border-amber-600 text-white font-semibold'
-                        : 'bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100 hover:border-slate-300'
+            {/* ── Section: กลุ่มแรก (ด้านบน): ใบเซอร์/อบรม ── */}
+            <div className="space-y-2.5 bg-amber-50/50 p-3 rounded-lg border border-amber-300">
+              <div className="flex items-center justify-between gap-2">
+                <div className="flex items-center gap-1.5">
+                  <Award className="w-4 h-4 text-amber-700" />
+                  <span className="text-xs font-bold text-amber-950">
+                    กลุ่มที่ 1: ใบเซอร์ / การอบรม
+                  </span>
+                </div>
+                <span className="text-[11px] text-amber-900 font-normal">
+                  ระบุวันหมดอายุของบัตรอบรม
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                {/* 1. บัตรอบรม Insee */}
+                <div className="bg-white p-2.5 rounded-lg border border-amber-300 space-y-1.5 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-slate-900">
+                      1. บัตรอบรม Insee
+                    </Label>
+                    <Badge
+                      variant="outline"
+                      className={`text-[11px] px-1.5 py-0.5 font-semibold ${
+                        inseeDialogStatus.status === 'expired'
+                          ? 'bg-rose-100 text-rose-950 border-rose-300'
+                          : inseeDialogStatus.status === 'expiring_soon'
+                          ? 'bg-amber-100 text-amber-950 border-amber-300'
+                          : inseeDialogStatus.status === 'valid'
+                          ? 'bg-emerald-50 text-emerald-950 border-emerald-300'
+                          : 'bg-slate-100 text-slate-700 border-slate-300'
+                      }`}
+                    >
+                      {inseeDialogStatus.label}
+                    </Badge>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="date"
+                      value={formData.insee_training_exp}
+                      onChange={e => setFormData(prev => ({ ...prev, insee_training_exp: e.target.value }))}
+                      className="h-9 text-xs bg-slate-50 border-slate-300 text-slate-900 font-normal"
+                    />
+                    {formData.insee_training_exp && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, insee_training_exp: '' }))}
+                        className="h-9 w-9 shrink-0 flex items-center justify-center rounded border border-slate-300 hover:bg-slate-100 text-slate-600 hover:text-slate-900"
+                        title="ล้างวันที่"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-normal">
+                    แจ้งเตือนล่วงหน้าเมื่อใกล้หมดอายุภายใน 30 วัน
+                  </p>
+                </div>
+
+                {/* 2. อบรม Boomlift */}
+                <div className="bg-white p-2.5 rounded-lg border border-amber-300 space-y-1.5 shadow-2xs">
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-slate-900">
+                      2. อบรม Boomlift
+                    </Label>
+                    <Badge
+                      variant="outline"
+                      className={`text-[11px] px-1.5 py-0.5 font-semibold ${
+                        boomliftDialogStatus.status === 'expired'
+                          ? 'bg-rose-100 text-rose-950 border-rose-300'
+                          : boomliftDialogStatus.status === 'expiring_soon'
+                          ? 'bg-amber-100 text-amber-950 border-amber-300'
+                          : boomliftDialogStatus.status === 'valid'
+                          ? 'bg-blue-50 text-blue-950 border-blue-300'
+                          : 'bg-slate-100 text-slate-700 border-slate-300'
+                      }`}
+                    >
+                      {boomliftDialogStatus.label}
+                    </Badge>
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <Input
+                      type="date"
+                      value={formData.boomlift_training_exp}
+                      onChange={e => setFormData(prev => ({ ...prev, boomlift_training_exp: e.target.value }))}
+                      className="h-9 text-xs bg-slate-50 border-slate-300 text-slate-900 font-normal"
+                    />
+                    {formData.boomlift_training_exp && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, boomlift_training_exp: '' }))}
+                        className="h-9 w-9 shrink-0 flex items-center justify-center rounded border border-slate-300 hover:bg-slate-100 text-slate-600 hover:text-slate-900"
+                        title="ล้างวันที่"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-600 font-normal">
+                    แจ้งเตือนล่วงหน้าเมื่อใกล้หมดอายุภายใน 30 วัน
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* ── Section: กลุ่มที่สอง (ด้านล่าง): สิทธิบัตร / เอกสารที่ต้องใช้ ── */}
+            <div className="space-y-2.5 bg-blue-50/50 p-3 rounded-lg border border-blue-300">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-1.5">
+                  <FileText className="w-4 h-4 text-blue-700" />
+                  <span className="text-xs font-bold text-slate-950">
+                    กลุ่มที่ 2: สิทธิบัตร / เอกสารที่ต้องใช้ (5 รายการ)
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={`text-[11px] font-bold ${
+                      dialogDocStats.isComplete
+                        ? 'bg-emerald-100 text-emerald-950 border-emerald-300'
+                        : 'bg-amber-100 text-amber-950 border-amber-300'
                     }`}
                   >
-                    + {preset}
-                  </button>
-                ))}
+                    {dialogDocStats.completedCount}/5 ได้แล้ว
+                  </Badge>
+                </div>
+
+                {/* Quick Toggle All Button */}
+                <button
+                  type="button"
+                  onClick={toggleAllDocs}
+                  className={`text-[11px] font-semibold px-2.5 py-1 rounded border transition-all cursor-pointer ${
+                    dialogDocStats.isComplete
+                      ? 'bg-white text-slate-800 border-slate-300 hover:bg-slate-100'
+                      : 'bg-emerald-600 text-white border-emerald-600 hover:bg-emerald-700 shadow-2xs'
+                  }`}
+                >
+                  {dialogDocStats.isComplete ? 'เคลียร์เอกสารทั้งหมด' : '✓ ติ๊กได้ครบทั้งหมด 5 รายการ'}
+                </button>
+              </div>
+
+              {/* 5 Document Toggle Rows */}
+              <div className="space-y-1.5 pt-1">
+                {REQUIRED_DOCUMENT_LIST.map((doc, idx) => {
+                  const DocIcon = DOC_ICONS[doc.id] || FileText
+                  const isChecked = formData.documents[doc.id as keyof ContractorDocuments]
+
+                  return (
+                    <div
+                      key={doc.id}
+                      className={`flex items-center justify-between p-2.5 rounded-lg border transition-all ${
+                        isChecked
+                          ? 'bg-white border-emerald-300 hover:bg-emerald-50/40'
+                          : 'bg-white border-slate-300 hover:bg-slate-50'
+                      }`}
+                    >
+                      {/* Left: Document Name & Icon */}
+                      <div
+                        onClick={() => toggleDoc(doc.id as keyof ContractorDocuments)}
+                        className="flex items-center gap-2 cursor-pointer select-none flex-1 py-0.5"
+                      >
+                        <div
+                          className={`w-7 h-7 rounded flex items-center justify-center shrink-0 ${
+                            isChecked
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          <DocIcon className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold text-slate-900">
+                            {idx + 1}. {doc.label}
+                          </p>
+                          <p className="text-[11px] text-slate-600 font-normal">
+                            {isChecked ? '✓ มีเอกสารเรียบร้อยแล้ว' : '✕ ยังไม่ได้รับเอกสาร'}
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Right: Binary Selection (✓ ได้แล้ว vs ✕ ยังขาด) */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setDocValue(doc.id as keyof ContractorDocuments, true)}
+                          className={`px-3 py-1 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 ${
+                            isChecked
+                              ? 'bg-emerald-600 text-white shadow-2xs font-bold'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          <Check className="w-3.5 h-3.5" />
+                          <span>ได้แล้ว</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setDocValue(doc.id as keyof ContractorDocuments, false)}
+                          className={`px-3 py-1 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1 ${
+                            !isChecked
+                              ? 'bg-rose-100 text-rose-950 border border-rose-300 font-bold shadow-2xs'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          <X className="w-3.5 h-3.5" />
+                          <span>ยังขาด</span>
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
 
-            {/* Wage & Phone in 2 Columns */}
-            <div className="grid grid-cols-2 gap-2">
-              {/* Daily Wage */}
-              <div className="space-y-1">
-                <Label className="text-xs font-semibold text-slate-700 flex items-center gap-1">
-                  <Coins className="w-3 h-3 text-amber-600" />
-                  ค่าแรง (บาท/วัน)
-                </Label>
-                <Input
-                  value={formData.daily_wage}
-                  onChange={e => setFormData(prev => ({ ...prev, daily_wage: e.target.value }))}
-                  placeholder="เช่น 500"
-                  className="h-8 text-xs bg-white border-slate-300 text-slate-900"
-                  type="number"
-                  min="0"
-                />
-              </div>
-
-              {/* Phone */}
-              <div className="space-y-1">
-                <Label htmlFor="contractor_phone" className="text-xs font-semibold text-slate-700 flex items-center gap-1">
-                  <Phone className="w-3.5 h-3.5 text-amber-600" />
-                  เบอร์โทรศัพท์ / ติดต่อ
-                </Label>
-                <Input
-                  id="contractor_phone"
-                  value={formData.phone}
-                  onChange={e => setFormData(prev => ({ ...prev, phone: e.target.value }))}
-                  placeholder="เช่น 081-234-5678"
-                  className="h-8 text-xs bg-white border-slate-300 text-slate-900 font-mono"
-                  type="tel"
-                  inputMode="tel"
-                />
-              </div>
-            </div>
-
-            {/* ALC Risk Toggle */}
-            <label
-              htmlFor="modal_alc_risk"
-              className="flex items-center justify-between p-2 rounded-lg border border-amber-200 bg-amber-50/60 hover:bg-amber-100/60 cursor-pointer transition-all"
-            >
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="modal_alc_risk"
-                  checked={formData.alc_risk}
-                  onCheckedChange={v => setFormData(prev => ({ ...prev, alc_risk: !!v }))}
-                />
-                <div>
-                  <p className="text-xs font-semibold text-amber-950 flex items-center gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5 text-amber-700" />
-                    ความเสี่ยง ALC (แอลกอฮอล์)
-                  </p>
-                  <p className="text-[10px] text-amber-800">
-                    หากติ๊กถูก จะมีแถบพื้นหลังสีเหลืองเตือนในตาราง Checklist
-                  </p>
-                </div>
-              </div>
-              <Badge
-                variant="outline"
-                className={
-                  formData.alc_risk
-                    ? 'bg-amber-100 text-amber-900 border-amber-300 text-[10px] font-bold'
-                    : 'bg-white text-slate-500 border-slate-200 text-[10px]'
-                }
-              >
-                {formData.alc_risk ? 'มีประวัติเสี่ยง' : 'ปกติ'}
-              </Badge>
-            </label>
-
-            {/* Active Toggle */}
-            <label
-              htmlFor="modal_is_active"
-              className="flex items-center justify-between p-2 rounded-lg border border-slate-200 bg-slate-50 hover:bg-slate-100 cursor-pointer transition-all"
-            >
-              <div className="flex items-center gap-2">
-                <Checkbox
-                  id="modal_is_active"
-                  checked={formData.is_active}
-                  onCheckedChange={v => setFormData(prev => ({ ...prev, is_active: !!v }))}
-                />
-                <div>
-                  <p className="text-xs font-semibold text-slate-800">เปิดใช้งาน (Active)</p>
-                  <p className="text-[10px] text-slate-400">แสดงในตาราง Checklist หน้างาน</p>
-                </div>
-              </div>
-              <Badge
-                variant="outline"
-                className={
-                  formData.is_active
-                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200 text-[10px]'
-                    : 'bg-slate-100 text-slate-500 text-[10px]'
-                }
-              >
-                {formData.is_active ? 'Active' : 'Inactive'}
-              </Badge>
-            </label>
           </div>
 
-          <DialogFooter className="pt-2.5 border-t border-slate-100 flex items-center justify-end gap-2">
+          <DialogFooter className="px-4 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-end gap-2 shrink-0">
             <Button
               type="button"
               variant="outline"
               size="sm"
               onClick={() => setDialogOpen(false)}
               disabled={saving}
-              className="h-8 px-3 text-xs bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
+              className="h-9 px-3.5 text-xs bg-white text-slate-800 border-slate-300 hover:bg-slate-100 font-normal"
             >
               ยกเลิก
             </Button>
@@ -791,7 +1310,7 @@ export default function ContractorsPage() {
               size="sm"
               onClick={handleSave}
               disabled={saving}
-              className="h-8 px-4 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 shadow-2xs"
+              className="h-9 px-4 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 shadow-2xs"
             >
               {saving ? (
                 <>

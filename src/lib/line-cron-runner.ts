@@ -57,8 +57,8 @@ export async function runDailyCronNotification(options: CronRunOptions = {}) {
     activities ?? []
   )
 
-  const textMsg = formatDailyLineMessage(report)
-  const flexPayload = buildDailyLineFlexMessage(report)
+  const textMsg = formatDailyLineMessage(report, options.slot)
+  const flexPayload = buildDailyLineFlexMessage(report, options.slot)
 
   const dispatchResult = await sendNotification({
     message: textMsg,

@@ -43,7 +43,7 @@ const navItems: NavItem[] = [
   },
   {
     label: 'Checklist มือถือ (3 สเตป)',
-    sublabel: 'โหมดตรวจเร็วแยกตามสังกัด',
+    sublabel: 'โหมดตรวจเร็วแยกตามทีมช่าง',
     href: '/checklist-m',
     icon: Smartphone,
     section: 'เมนูหลัก',

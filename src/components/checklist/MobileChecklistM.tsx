@@ -31,7 +31,7 @@ import {
   MapPin, Briefcase, User, Save, RefreshCw, Zap, ArrowLeft,
   Check, X, FileText, ChevronDown, Plus, Sparkles, Building2,
   Users, CheckCircle, MessageSquare, Phone, Monitor, RotateCcw,
-  Sliders, Send, Loader2
+  Sliders, Send, Loader2, Trash2
 } from 'lucide-react'
 import { PpeSettingsModal } from '@/components/checklist/PpeSettingsModal'
 import { extractUserNote } from '@/lib/utils'
@@ -106,6 +106,49 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
   const [lineTargetGroup, setLineTargetGroup] = useState('')
   const [lineMessageText, setLineMessageText] = useState('')
   const [lineSending, setLineSending] = useState(false)
+
+  // ── Custom LINE Quick Message Templates State ──
+  const [customQuickMessages, setCustomQuickMessages] = useState<{ id: string; title: string; text: string }[]>([])
+  const [showAddQuick, setShowAddQuick] = useState(false)
+  const [newQuickTitle, setNewQuickTitle] = useState('')
+  const [newQuickText, setNewQuickText] = useState('')
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('line_custom_quick_messages')
+      if (saved) {
+        setCustomQuickMessages(JSON.parse(saved))
+      }
+    } catch {}
+  }, [])
+
+  const handleSaveQuickMessage = () => {
+    if (!newQuickTitle.trim() || !newQuickText.trim()) return
+    const newItem = {
+      id: 'qm_' + Date.now(),
+      title: newQuickTitle.trim(),
+      text: newQuickText.trim(),
+    }
+    const updated = [...customQuickMessages, newItem]
+    setCustomQuickMessages(updated)
+    try {
+      localStorage.setItem('line_custom_quick_messages', JSON.stringify(updated))
+    } catch {}
+    toast.success(`เพิ่มข้อความด่วน "${newQuickTitle.trim()}" เรียบร้อยแล้ว`)
+    setNewQuickTitle('')
+    setNewQuickText('')
+    setShowAddQuick(false)
+  }
+
+  const handleDeleteQuickMessage = (id: string, title: string) => {
+    if (!confirm(`ต้องการลบข้อความด่วน "${title}" หรือไม่?`)) return
+    const updated = customQuickMessages.filter(m => m.id !== id)
+    setCustomQuickMessages(updated)
+    try {
+      localStorage.setItem('line_custom_quick_messages', JSON.stringify(updated))
+    } catch {}
+    toast.success(`ลบข้อความด่วน "${title}" แล้ว`)
+  }
 
   // Step 1: Selected Company
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
@@ -485,12 +528,12 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
         if (entry) {
           checkedInTotal++
           if (entry.purpose?.trim()) reqCount++
-          if (entry.meal_allowance) mealCount++
           const isAlcPass = isAlcoholPassed(entry.alc_result)
           const isPpePass = checkEntryPpePass(entry)
 
           if (isAlcPass && isPpePass) {
             passed++
+            if (entry.meal_allowance) mealCount++
           } else {
             if (!isAlcPass) alcFail++
             if (!isPpePass) ppeFail++
@@ -680,104 +723,61 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
     setCurrentStep(3)
   }
 
-  // Quick 1-Tap Toggle Meal Allowance for Contractor
+  // Quick 1-Tap Toggle Meal Allowance for Contractor (เฉพาะผู้ที่ผ่านการตรวจแล้วเท่านั้น)
   const handleToggleMemberMeal = async (contractor: Contractor, e?: React.MouseEvent) => {
     if (e) e.stopPropagation()
     const existingEntry = getEntryForContractor(contractor)
-    const nextVal = existingEntry ? !existingEntry.meal_allowance : true
-
-    if (existingEntry) {
-      try {
-        const res = await fetch(`/api/checklist/${existingEntry.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            meal_allowance: nextVal,
-          }),
-        })
-        if (!res.ok) {
-          const errData = await res.json()
-          throw new Error(errData.error || 'อัปเดตไม่สำเร็จ')
-        }
-        toast.success(`${nextVal ? '🍱 รับข้าวกล่อง' : '❌ ยกเลิกรับข้าว'}: ${contractor.name}`)
-        await loadData(true)
-      } catch (err: any) {
-        toast.error(`อัปเดตสถานะรับข้าวไม่สำเร็จ: ${err.message}`)
-      }
-    } else {
-      // If not checked in yet, quick check-in with meal allowance
-      const compSummary = companySummaries.find(c => c.name === (contractor.company_name || selectedCompany))
-      const savedPref = contractor.id ? getContractorSavedPref(contractor.id) : null
-      const targetActId = savedPref?.activity_id || activities[0]?.id || ''
-      const tasks = getTasksForActivity(targetActId)
-      const targetActObj = activities.find(a => a.id === targetActId) || activities[0]
-      const defaultTask = (savedPref?.activity_id === targetActId ? savedPref?.activity_name : null) || tasks[0] || targetActObj?.name || ''
-      const memberWage = getContractorDailyWage(contractor)
-
-      const quickPpeDetails: Record<string, boolean> = {}
-      activePpeItems.forEach(it => { quickPpeDetails[it.id] = true })
-
-      const payload = {
-        entry_date: date,
-        contractor_id: contractor.id || null,
-        contractor_name: contractor.name,
-        company_name: contractor.company_name || selectedCompany || null,
-        supervisor: savedPref?.supervisor || formSupervisor.trim() || mobileUser?.name || currentUserSupervisor || null,
-        purpose: null,
-        activity_id: targetActId,
-        activity_name: savedPref?.activity_name || compSummary?.activityName || defaultTask,
-        location: savedPref?.location || compSummary?.location || targetActObj?.location || null,
-        check_in_time: '08:00',
-        check_out_time: '17:00',
-        alc_result: normalizeAlcForDb('0%') as ALCResult,
-        ppe_helmet: quickPpeDetails['helmet'] ?? true,
-        ppe_vest: quickPpeDetails['vest'] ?? true,
-        ppe_shirt: quickPpeDetails['glasses'] ?? quickPpeDetails['shirt'] ?? true,
-        ppe_gloves: quickPpeDetails['gloves'] ?? true,
-        ppe_shoes: quickPpeDetails['shoes'] ?? true,
-        daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : null,
-        status: 'active' as const,
-        is_blacklisted: false,
-        meal_allowance: true,
-        notes: JSON.stringify({ ppe_details: quickPpeDetails }),
-      }
-
-      try {
-        const res = await fetch('/api/checklist', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        })
-        if (!res.ok) {
-          const errData = await res.json()
-          throw new Error(errData.error || 'บันทึกไม่สำเร็จ')
-        }
-        toast.success(`🍱 ตรวจผ่าน & บันทึกรับข้าว: ${contractor.name}`)
-        await loadData(true)
-      } catch (err: any) {
-        toast.error(`บันทึกไม่สำเร็จ: ${err.message}`)
-      }
-    }
-  }
-
-  // Toggle all meals for checked contractors in current team
-  const handleToggleAllMeals = async () => {
-    const checkedEntries = currentTeamMembers
-      .map(m => getEntryForContractor(m))
-      .filter((e): e is ChecklistEntry => !!e && !!e.id)
-
-    if (checkedEntries.length === 0) {
-      toast.warning('ยังไม่มีผู้ที่ตรวจแล้วในสังกัดนี้')
+    if (!existingEntry) {
+      toast.warning(`ช่าง ${contractor.name} ยังไม่ได้ตรวจเช็ค (รับข้าวได้เฉพาะผู้ที่ผ่านการตรวจแล้วเท่านั้น)`)
       return
     }
 
-    const currentMealCount = checkedEntries.filter(e => !!e.meal_allowance).length
-    const isAllReceived = currentMealCount === checkedEntries.length
+    const isAlcPass = !isAlcoholFailed(existingEntry.alc_result)
+    const isPpePass = checkEntryPpePass(existingEntry)
+    if (!isAlcPass || !isPpePass) {
+      toast.error(`ช่าง ${contractor.name} ตรวจไม่ผ่านความปลอดภัย ไม่อนุมัติรับข้าว`)
+      return
+    }
+
+    const nextVal = !existingEntry.meal_allowance
+    try {
+      const res = await fetch(`/api/checklist/${existingEntry.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          meal_allowance: nextVal,
+        }),
+      })
+      if (!res.ok) {
+        const errData = await res.json()
+        throw new Error(errData.error || 'อัปเดตไม่สำเร็จ')
+      }
+      toast.success(`${nextVal ? '🍱 รับข้าว' : '❌ ไม่รับข้าว'}: ${contractor.name}`)
+      await loadData(true)
+    } catch (err: any) {
+      toast.error(`อัปเดตสถานะรับข้าวไม่สำเร็จ: ${err.message}`)
+    }
+  }
+
+  // Toggle all meals for checked contractors who PASSED in current team
+  const handleToggleAllMeals = async () => {
+    // กรองเฉพาะผู้ที่ผ่านการตรวจความปลอดภัยแล้วเท่านั้น
+    const passedEntries = currentTeamMembers
+      .map(m => getEntryForContractor(m))
+      .filter((e): e is ChecklistEntry => !!e && !!e.id && isAlcoholPassed(e.alc_result) && checkEntryPpePass(e))
+
+    if (passedEntries.length === 0) {
+      toast.warning('ยังไม่มีผู้ที่ผ่านการตรวจความปลอดภัยในสังกัดนี้ (รับข้าวได้เฉพาะผู้ที่ผ่านการตรวจแล้วเท่านั้น)')
+      return
+    }
+
+    const currentMealCount = passedEntries.filter(e => !!e.meal_allowance).length
+    const isAllReceived = currentMealCount === passedEntries.length
     const targetVal = !isAllReceived
 
     setIsUpdatingAllMeals(true)
     try {
-      const ids = checkedEntries.map(e => e.id)
+      const ids = passedEntries.map(e => e.id)
       const res = await fetch('/api/checklist', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -794,8 +794,8 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
 
       toast.success(
         targetVal
-          ? `🍱 บันทึกรับข้าวกล่องทั้งหมดแล้ว (${checkedEntries.length} คน)`
-          : `❌ ยกเลิกรับข้าวกล่องทั้งหมดแล้ว (${checkedEntries.length} คน)`
+          ? `🍱 บันทึกรับข้าวทั้งหมดแล้ว (${passedEntries.length} คน)`
+          : `❌ ยกเลิกรับข้าวทั้งหมดแล้ว (${passedEntries.length} คน)`
       )
       await loadData(true)
     } catch (err: any) {
@@ -946,7 +946,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
       daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
       status: 'active' as const,
       is_blacklisted: false,
-      meal_allowance: !!formMealAllowance,
+      meal_allowance: (!isAlcoholFailed(normalizeAlcForDb(formAlc) as ALCResult) && activePpeItems.every(i => !i.required || !!formPpeValues[i.id])) ? !!formMealAllowance : false,
       notes: formPpeJson,
     }
 
@@ -1213,7 +1213,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                     <span>•</span>
                     <span className="text-amber-800 font-bold flex items-center gap-0.5">
                       <span>🍱</span>
-                      <span>{entries.filter(e => e.meal_allowance).length} ข้าว</span>
+                      <span>{entries.filter(e => e.meal_allowance && isAlcoholPassed(e.alc_result) && checkEntryPpePass(e)).length} ข้าว</span>
                     </span>
                   </>
                 )}
@@ -1298,9 +1298,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                               const targetGroup = comp.lineGroup || matchedUser?.line_group || ''
                               setLineTargetCompany(comp)
                               setLineTargetGroup(targetGroup)
-                              setLineMessageText(
-                                `📢 แจ้งเตือนทีม ${comp.name}${comp.code ? ` [${comp.code}]` : ''}: วันที่ ${format(new Date(date), 'dd/MM/yyyy')} มีผู้เข้าตรวจแล้ว ${comp.passedCount}/${comp.totalCount} คน กรุณาประสานงานให้พนักงานเข้าตรวจเช็คชื่อและสวมใส่อุปกรณ์ PPE ให้ครบถ้วน`
-                              )
+                              setLineMessageText('')
                               setLineModalOpen(true)
                             }}
                             className="w-7 h-7 rounded-full bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 flex items-center justify-center transition-all active:scale-90 shadow-2xs"
@@ -1515,7 +1513,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
             {mealConfig.enabled && memberStatusFilter === 'checked' && (() => {
               const checkedEntries = currentTeamMembers
                 .map(m => getEntryForContractor(m))
-                .filter((e): e is ChecklistEntry => !!e)
+                .filter((e): e is ChecklistEntry => !!e && isAlcoholPassed(e.alc_result) && checkEntryPpePass(e))
               const mealCount = checkedEntries.filter(e => !!e.meal_allowance).length
               const totalChecked = checkedEntries.length
               const isAllReceived = totalChecked > 0 && mealCount === totalChecked
@@ -1764,8 +1762,8 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                             </span>
                           )}
 
-                          {/* Meal allowance badge/toggle button */}
-                          {mealConfig.enabled && isChecked && (
+                          {/* Meal allowance badge/toggle button (แสดงเฉพาะผู้ที่ผ่านการตรวจความปลอดภัยแล้วเท่านั้น) */}
+                          {mealConfig.enabled && isChecked && isSafe && (
                             <button
                               type="button"
                               onClick={e => handleToggleMemberMeal(member, e)}
@@ -1774,7 +1772,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                                   ? 'bg-amber-100 text-amber-950 border-amber-400 hover:bg-amber-200/80 ring-1 ring-amber-300/60'
                                   : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-slate-200'
                               }`}
-                              title={entry?.meal_allowance ? 'รับข้าวกล่องแล้ว (แตะเพื่อเปลี่ยน)' : 'ยังไม่ได้รับข้าว (แตะเพื่อรับข้าว)'}
+                              title={entry?.meal_allowance ? 'รับข้าวแล้ว (แตะเพื่อเปลี่ยน)' : 'ไม่รับข้าว (แตะเพื่อรับข้าว)'}
                             >
                               <span className="text-xs">🍱</span>
                               <span>{entry?.meal_allowance ? 'รับข้าว' : 'ไม่รับข้าว'}</span>
@@ -2217,7 +2215,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                         : 'bg-slate-100 text-slate-600 border-slate-300'
                     }`}
                   >
-                    {formMealAllowance ? '✓ รับข้าวกล่อง' : 'ไม่ได้รับ'}
+                    {formMealAllowance ? '✓ รับข้าว' : 'ไม่รับข้าว'}
                   </span>
                 </div>
 
@@ -2235,11 +2233,9 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                     className="rounded text-amber-600 focus:ring-0 w-4 h-4 shrink-0"
                   />
                   <div className="flex flex-col">
-                    <span className="text-xs">รับข้าวกล่อง / ค่าอาหารประจำวัน</span>
+                    <span className="text-xs">รับข้าว / ค่าอาหาร</span>
                     <span className="text-[10px] text-amber-800 font-normal">
-                      {mealConfig.price_per_meal
-                        ? `(อัตรา ฿${mealConfig.price_per_meal} / กล่อง • นับยอดสั่งข้าวโครงการ)`
-                        : 'บันทึกยอดเพื่อรวมสั่งข้าวโครงการประจำวัน'}
+                      เฉพาะผู้ที่ผ่านการตรวจความปลอดภัย (ALC และ PPE ครบ) เท่านั้น
                     </span>
                   </div>
                 </label>
@@ -2678,7 +2674,10 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
               </div>
               <button
                 type="button"
-                onClick={() => setLineModalOpen(false)}
+                onClick={() => {
+                  setLineMessageText('')
+                  setLineModalOpen(false)
+                }}
                 className="w-8 h-8 rounded-full flex items-center justify-center text-slate-300 hover:text-white hover:bg-white/10 transition-colors"
               >
                 <X className="w-5 h-5" />
@@ -2711,25 +2710,146 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
               <div className="space-y-1">
                 <label className="text-xs font-semibold text-slate-700 flex items-center justify-between">
                   <span>ข้อความแจ้งเตือน *</span>
-                  <span className="text-[10px] text-slate-400 font-normal">
-                    {lineMessageText.length} ตัวอักษร
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {lineMessageText.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => setLineMessageText('')}
+                        className="text-[11px] text-rose-600 hover:text-rose-700 font-semibold hover:underline flex items-center gap-0.5"
+                        title="ล้างข้อความในกล่องเป็นค่าว่าง"
+                      >
+                        <Trash2 className="w-3 h-3" /> เคลียร์ข้อความ
+                      </button>
+                    )}
+                    <span className="text-[10px] text-slate-400 font-normal">
+                      {lineMessageText.length} ตัวอักษร
+                    </span>
+                  </div>
                 </label>
                 <textarea
                   value={lineMessageText}
                   onChange={e => setLineMessageText(e.target.value)}
                   rows={4}
-                  placeholder="พิมพ์ข้อความที่ต้องการส่งเข้ากลุ่ม LINE..."
+                  placeholder="พิมพ์ข้อความที่ต้องการส่งเข้ากลุ่ม LINE หรือเลือกข้อความด่วนด้านล่าง..."
                   className="w-full p-2.5 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 font-normal focus:ring-1 focus:ring-emerald-500 focus:outline-none resize-none leading-relaxed"
                 />
               </div>
 
               {/* Quick Template Chips */}
-              <div className="space-y-1.5">
-                <p className="text-[11px] font-semibold text-slate-600">
-                  ข้อความด่วน (คลิกเพื่อเปลี่ยนข้อความ):
-                </p>
-                <div className="flex flex-wrap gap-1.5">
+              <div className="space-y-2 pt-1 border-t border-slate-100">
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold text-slate-700 flex items-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-500" />
+                    <span>ข้อความด่วน (คลิกเพื่อเลือกข้อความ):</span>
+                  </p>
+                  <div className="flex items-center gap-1.5">
+                    {lineMessageText.trim() && (
+                      <button
+                        type="button"
+                        onClick={() => setLineMessageText('')}
+                        className="text-[10px] text-slate-500 hover:text-rose-600 font-medium"
+                      >
+                        ล้างเป็นค่าว่าง
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!showAddQuick && lineMessageText.trim()) {
+                          setNewQuickText(lineMessageText.trim())
+                        }
+                        setShowAddQuick(prev => !prev)
+                      }}
+                      className="text-[10px] font-semibold text-emerald-700 hover:text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 px-2 py-0.5 rounded-md flex items-center gap-0.5 active:scale-95 transition-all"
+                    >
+                      <Plus className="w-3 h-3" />
+                      <span>{showAddQuick ? 'ปิดฟอร์ม' : 'เพิ่มข้อความด่วน'}</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Inline form to add quick message */}
+                {showAddQuick && (
+                  <div className="p-2.5 bg-slate-50 border border-slate-300 rounded-xl space-y-2 text-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-slate-900 text-xs flex items-center gap-1">
+                        <Plus className="w-3.5 h-3.5 text-emerald-600" />
+                        เพิ่มข้อความด่วนใหม่
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddQuick(false)}
+                        className="text-slate-400 hover:text-slate-600"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] text-slate-700 font-medium block">
+                        ชื่อปุ่มด่วน (สั้นๆ เช่น ⏰ เตือนกะบ่าย หรือ 📢 ประชุม):
+                      </label>
+                      <input
+                        type="text"
+                        value={newQuickTitle}
+                        onChange={e => setNewQuickTitle(e.target.value)}
+                        placeholder="เช่น ⏰ เตือนกะบ่าย"
+                        className="w-full h-8 px-2 mt-0.5 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-normal"
+                        autoFocus
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[11px] text-slate-700 font-medium flex items-center justify-between">
+                        <span>ข้อความที่จะส่ง:</span>
+                        <span className="text-[10px] text-slate-400 font-normal">
+                          ใส่ &#123;company&#125; เพื่อแทนชื่อสังกัด
+                        </span>
+                      </label>
+                      <textarea
+                        value={newQuickText}
+                        onChange={e => setNewQuickText(e.target.value)}
+                        rows={2}
+                        placeholder="พิมพ์ข้อความที่ต้องการบันทึก..."
+                        className="w-full p-2 mt-0.5 text-xs rounded-lg border border-slate-300 bg-white text-slate-900 focus:outline-none focus:ring-1 focus:ring-emerald-500 font-normal resize-none"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-1.5 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowAddQuick(false)}
+                        className="px-2.5 py-1 text-xs text-slate-600 hover:bg-slate-200 rounded-lg font-normal"
+                      >
+                        ยกเลิก
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleSaveQuickMessage}
+                        disabled={!newQuickTitle.trim() || !newQuickText.trim()}
+                        className="px-3 py-1 text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg disabled:opacity-50 active:scale-95 shadow-2xs"
+                      >
+                        บันทึกข้อความด่วน
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* All Quick Chips: Built-in + Custom */}
+                <div className="flex flex-wrap gap-1.5 max-h-36 overflow-y-auto pr-0.5">
+                  {/* Built-in templates */}
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLineMessageText(
+                        `📢 แจ้งเตือนทีม ${lineTargetCompany.name}${lineTargetCompany.code ? ` [${lineTargetCompany.code}]` : ''}: วันที่ ${format(new Date(date), 'dd/MM/yyyy')} มีผู้เข้าตรวจแล้ว ${lineTargetCompany.passedCount}/${lineTargetCompany.totalCount} คน กรุณาประสานงานให้พนักงานเข้าตรวจเช็คชื่อและสวมใส่อุปกรณ์ PPE ให้ครบถ้วน`
+                      )
+                    }
+                    className="text-[10px] px-2 py-1 rounded-md bg-purple-50 text-purple-900 border border-purple-200 hover:bg-purple-100 transition-colors font-medium flex items-center gap-1 active:scale-95"
+                  >
+                    <span>📢 แจ้งยอดเข้าตรวจ</span>
+                  </button>
+
                   <button
                     type="button"
                     onClick={() =>
@@ -2777,6 +2897,38 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                   >
                     <span>📊 สรุปยอดเข้างาน</span>
                   </button>
+
+                  {/* Custom User Templates */}
+                  {customQuickMessages.map(item => (
+                    <div
+                      key={item.id}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-teal-50 text-teal-950 border border-teal-300 font-medium text-[10px] shadow-2xs group"
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const parsedText = item.text
+                            .replace(/\{company\}/gi, lineTargetCompany.name)
+                            .replace(/\{date\}/gi, format(new Date(date), 'dd/MM/yyyy'))
+                          setLineMessageText(parsedText)
+                        }}
+                        className="hover:underline flex items-center gap-1 text-left"
+                      >
+                        <span>{item.title}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleDeleteQuickMessage(item.id, item.title)
+                        }}
+                        className="w-3.5 h-3.5 rounded-full hover:bg-rose-100 hover:text-rose-700 text-slate-400 flex items-center justify-center transition-colors ml-0.5"
+                        title="ลบข้อความด่วนนี้"
+                      >
+                        <X className="w-2.5 h-2.5" />
+                      </button>
+                    </div>
+                  ))}
                 </div>
               </div>
             </div>
@@ -2785,7 +2937,10 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
             <div className="p-3 bg-slate-50 border-t border-slate-200 shrink-0 grid grid-cols-2 gap-2">
               <button
                 type="button"
-                onClick={() => setLineModalOpen(false)}
+                onClick={() => {
+                  setLineMessageText('')
+                  setLineModalOpen(false)
+                }}
                 disabled={lineSending}
                 className="h-10 rounded-xl border border-slate-300 bg-white text-slate-700 text-xs font-semibold hover:bg-slate-100"
               >
@@ -2811,6 +2966,7 @@ export function MobileChecklistM({ initialDate, mobileUser, onOpenAuth, onNaviga
                       throw new Error(data.error || 'ส่งข้อความไม่สำเร็จ')
                     }
                     toast.success('ส่งข้อความเข้ากลุ่ม LINE เรียบร้อยแล้ว')
+                    setLineMessageText('')
                     setLineModalOpen(false)
                   } catch (err: any) {
                     console.error('Send LINE message error:', err)

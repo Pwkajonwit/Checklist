@@ -251,49 +251,46 @@ export function MobileCompaniesView() {
                   </div>
 
                   <div className="min-w-0">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <h2 className="text-xs font-semibold text-slate-900 leading-tight">
-                        {c.name}
-                      </h2>
-                      {cleanCompanyCode(c.code) && (
-                        <span className="px-2 py-0.5 rounded font-bold text-xs bg-cyan-50 text-cyan-800 border border-cyan-300">
-                          [{cleanCompanyCode(c.code)}]
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Phone & Line Group Badges */}
                     {(() => {
                       const phone = getCompanyPhone(c)
                       const lineGroup = getCompanyLineGroup(c)
-                      if (!phone && !lineGroup) return null
                       return (
-                        <div className="flex items-center gap-1.5 flex-wrap mt-1">
-                          {phone && (
-                            <a
-                              href={`tel:${phone}`}
-                              className="inline-flex items-center gap-1 text-[11px] font-mono font-medium text-sky-700 bg-sky-50 border border-sky-200 px-2 py-0.5 rounded hover:bg-sky-100"
-                            >
-                              <Phone className="w-3 h-3 text-sky-600" />
-                              <span>{phone}</span>
-                            </a>
+                        <>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <h2 className="text-xs font-semibold text-slate-900 leading-tight">
+                              {c.name}
+                            </h2>
+                            {cleanCompanyCode(c.code) && (
+                              <span className="px-2 py-0.5 rounded font-bold text-xs bg-cyan-50 text-cyan-800 border border-cyan-300">
+                                [{cleanCompanyCode(c.code)}]
+                              </span>
+                            )}
+                            {phone && (
+                              <a
+                                href={`tel:${phone}`}
+                                className="inline-flex items-center gap-1 text-[11px] font-normal text-sky-800 bg-sky-50 border border-sky-300 px-2 py-0.5 rounded hover:bg-sky-100"
+                              >
+                                <Phone className="w-3 h-3 text-sky-600" />
+                                <span>{phone}</span>
+                              </a>
+                            )}
+                            {lineGroup && (
+                              <div className="inline-flex items-center gap-1 text-[11px] font-normal text-emerald-800 bg-emerald-50 border border-emerald-300 px-2 py-0.5 rounded max-w-[150px] truncate">
+                                <MessageSquare className="w-3 h-3 text-[#06C755] shrink-0" />
+                                <span className="truncate">{lineGroup}</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {c.created_at && (
+                            <span className="text-[11px] text-slate-600 font-normal flex items-center gap-1 mt-1">
+                              <Calendar className="w-3 h-3 text-slate-500" />
+                              สร้างเมื่อ {format(new Date(c.created_at), 'dd/MM/yyyy')}
+                            </span>
                           )}
-                          {lineGroup && (
-                            <div className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-800 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded max-w-[150px] truncate">
-                              <MessageSquare className="w-3 h-3 text-[#06C755] shrink-0" />
-                              <span className="truncate">{lineGroup}</span>
-                            </div>
-                          )}
-                        </div>
+                        </>
                       )
                     })()}
-
-                    {c.created_at && (
-                      <span className="text-[11px] text-slate-500 font-normal flex items-center gap-1 mt-1">
-                        <Calendar className="w-3 h-3 text-slate-400" />
-                        สร้างเมื่อ {format(new Date(c.created_at), 'dd/MM/yyyy')}
-                      </span>
-                    )}
                   </div>
                 </div>
 

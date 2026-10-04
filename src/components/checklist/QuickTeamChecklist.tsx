@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { ChecklistEntry, Contractor, Company, Activity, ALCResult, ChecklistPpeItem, MealConfig } from '@/lib/types'
 import { getContractorAlcRisk, getContractorDailyWage, isAlcoholPassed, isAlcoholFailed, isAlcoholUnchecked, normalizeAlcForDb, DEFAULT_CHECKLIST_PPE_ITEMS, DEFAULT_MEAL_CONFIG } from '@/lib/types'
@@ -319,7 +319,12 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
   }, [loadMasterData])
 
   // Sync Supabase entries into rowStates
+  const lastDateRef = useRef(date)
+
   useEffect(() => {
+    const isDateChanged = lastDateRef.current !== date
+    lastDateRef.current = date
+
     const newStates: Record<string, RowChecklistState> = {}
 
     contractors.forEach(c => {
@@ -355,7 +360,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           notes: extractUserNote(entry.notes) || undefined,
         }
       } else {
-        newStates[c.id] = newStates[c.id] || {
+        newStates[c.id] = {
           alc_result: '',
           ppe_helmet: false,
           ppe_vest: false,
@@ -371,8 +376,27 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       }
     })
 
-    setRowStates(prev => ({ ...newStates, ...prev }))
-  }, [contractors, entries, defaultActivityId, defaultActivityName, defaultLocation, defaultSupervisor, currentUserSupervisor])
+    setRowStates(prev => {
+      if (isDateChanged) {
+        return newStates
+      }
+
+      const merged: Record<string, RowChecklistState> = {}
+      contractors.forEach(c => {
+        const hasDbEntry = entries.some(
+          e => (e.contractor_id && e.contractor_id === c.id) || e.contractor_name === c.name
+        )
+        if (hasDbEntry) {
+          // มีบันทึกในฐานข้อมูลแล้ว -> ใช้ค่าจาก DB โดยตรงเสมอ
+          merged[c.id] = newStates[c.id]
+        } else {
+          // ยังไม่มีใน DB -> ถ้ากำลังแก้ไขค้างอยู่ให้คงค่าไว้ ถ้าไม่มีให้ใช้ค่าเริ่มต้น
+          merged[c.id] = prev[c.id] || newStates[c.id]
+        }
+      })
+      return merged
+    })
+  }, [date, contractors, entries, defaultActivityId, defaultActivityName, defaultLocation, defaultSupervisor, currentUserSupervisor])
 
   // Affiliation summary for LEFT COLUMN
   const affiliationList = useMemo(() => {
@@ -388,7 +412,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
     })
 
     contractors.forEach(c => {
-      const compName = (c.company_name || 'ไม่ระบุสังกัด').trim()
+      const compName = (c.company_name || 'ไม่ระบุทีม').trim()
       if (!map.has(compName)) {
         map.set(compName, {
           id: c.company_id ?? undefined,
@@ -407,8 +431,8 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
     })
 
     const allItems = Array.from(map.values()).sort((a, b) => {
-      if (a.name === 'ไม่ระบุสังกัด') return 1
-      if (b.name === 'ไม่ระบุสังกัด') return -1
+      if (a.name === 'ไม่ระบุทีม') return 1
+      if (b.name === 'ไม่ระบุทีม') return -1
       return a.name.localeCompare(b.name, 'th')
     })
 
@@ -421,7 +445,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
   // Filtered members for current company
   const currentTeamMembers = useMemo(() => {
     return contractors.filter(c => {
-      const compName = (c.company_name || 'ไม่ระบุสังกัด').trim()
+      const compName = (c.company_name || 'ไม่ระบุทีม').trim()
       const matchComp = selectedCompany === 'all' || compName === selectedCompany
       const matchSearch =
         !searchMember ||
@@ -500,6 +524,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       ppe_gloves: targetState,
       ppe_shoes: targetState,
       ppe_details: nextDetails,
+      meal_allowance: targetState && mealConfig.enabled ? true : false,
     })
   }
 
@@ -562,9 +587,56 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
     })
   }
 
-  const bulkToggleMeal = () => {
-    const allChecked = currentTeamMembers.every(c => !!getRowState(c.id).meal_allowance)
-    const nextVal = !allChecked
+  // 1-Tap Toggle Meal for single member (Auto-persists if entry exists)
+  const handleToggleMeal = async (member: Contractor) => {
+    const st = getRowState(member.id)
+    const isSafe = isRowAllPpePassed(st) && isAlcoholPassed(st.alc_result)
+    if (!isSafe) {
+      toast.warning(`ช่าง ${member.name} ยังไม่ผ่านการตรวจความปลอดภัย (รับข้าวได้เฉพาะผู้ที่ผ่านการตรวจแล้วเท่านั้น)`)
+      return
+    }
+
+    const nextVal = !st.meal_allowance
+    updateRow(member.id, { meal_allowance: nextVal })
+
+    // Auto-save to Supabase if entry already saved in database
+    const existingEntry = getEntryForContractor(member)
+    if (existingEntry?.id) {
+      try {
+        const res = await fetch(`/api/checklist/${existingEntry.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ meal_allowance: nextVal }),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error || 'อัปเดตไม่สำเร็จ')
+        }
+        toast.success(`${nextVal ? '🍱 บันทึกรับข้าว' : '❌ ยกเลิกรับข้าว'}: ${member.name}`)
+        onRefreshEntries()
+      } catch (err: any) {
+        toast.error(`บันทึกสถานะข้าวไม่สำเร็จ: ${err.message}`)
+        updateRow(member.id, { meal_allowance: !nextVal })
+      }
+    } else {
+      toast.info(`${nextVal ? '🍱 เลือกรับข้าว' : '❌ ไม่รับข้าว'}: ${member.name} (กดปุ่มบันทึกเพื่อจัดเก็บลงระบบ)`)
+    }
+  }
+
+  const bulkToggleMeal = async () => {
+    // กรองเฉพาะช่างที่ผ่านการตรวจความปลอดภัยแล้วเท่านั้น (isSafe)
+    const safeMembers = currentTeamMembers.filter(c => {
+      const st = getRowState(c.id)
+      return isRowAllPpePassed(st) && isAlcoholPassed(st.alc_result)
+    })
+
+    if (safeMembers.length === 0) {
+      toast.warning('ยังไม่มีช่างที่ผ่านการตรวจความปลอดภัยในทีมนี้ (รับข้าวได้เฉพาะผู้ที่ผ่านการตรวจแล้วเท่านั้น)')
+      return
+    }
+
+    const allSafeChecked = safeMembers.every(c => !!getRowState(c.id).meal_allowance)
+    const nextVal = !allSafeChecked
 
     setRowStates(prev => {
       const updated = { ...prev }
@@ -578,11 +650,48 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           ppe_shoes: false,
           meal_allowance: false,
         }
-        updated[c.id] = { ...cur, meal_allowance: nextVal }
+        const isRowSafe = isRowAllPpePassed(cur) && isAlcoholPassed(cur.alc_result)
+        if (isRowSafe) {
+          updated[c.id] = { ...cur, meal_allowance: nextVal }
+        } else {
+          updated[c.id] = { ...cur, meal_allowance: false }
+        }
       })
       return updated
     })
-    toast.info(nextVal ? 'เลือกรับอาหารทุกคนแล้ว' : 'ยกเลิกรับอาหารทุกคนแล้ว')
+
+    // Auto-save all existing entries in database
+    const existingEntryIds = safeMembers
+      .map(m => getEntryForContractor(m))
+      .filter((e): e is ChecklistEntry => !!e && !!e.id)
+      .map(e => e.id)
+
+    if (existingEntryIds.length > 0) {
+      try {
+        const res = await fetch('/api/checklist', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ids: existingEntryIds,
+            updates: { meal_allowance: nextVal },
+          }),
+        })
+        if (!res.ok) {
+          const errData = await res.json()
+          throw new Error(errData.error || 'อัปเดตไม่สำเร็จ')
+        }
+        toast.success(
+          nextVal
+            ? `🍱 บันทึกรับข้าวให้ช่างที่ตรวจแล้ว (${existingEntryIds.length} คน)`
+            : `❌ ยกเลิกรับข้าวทั้งหมดแล้ว (${existingEntryIds.length} คน)`
+        )
+        onRefreshEntries()
+      } catch (err: any) {
+        toast.error(`อัปเดตสถานะรับข้าวไม่สำเร็จ: ${err.message}`)
+      }
+    } else {
+      toast.info(nextVal ? `เลือกรับข้าวให้ผู้ที่ผ่านการตรวจแล้ว (${safeMembers.length} คน) (กดบันทึกทั้งหมดเพื่อจัดเก็บ)` : 'ยกเลิกรับข้าวทั้งหมดแล้ว')
+    }
   }
 
   const handlePassAllTeam = () => {
@@ -604,6 +713,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           ppe_gloves: true,
           ppe_shoes: true,
           ppe_details: nextDetails,
+          meal_allowance: mealConfig.enabled ? true : false,
           activity_id: cur.activity_id || defaultActivityId || undefined,
           activity_name: cur.activity_name || defaultActivityName || undefined,
           location: cur.location || defaultLocation || undefined,
@@ -611,7 +721,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       })
       return updated
     })
-    toast.success('ตั้งค่าให้ลูกทีมทุกคนผ่าน Checklist ครบทุกข้อแล้ว')
+    toast.success('ตั้งค่าทุกคนในทีม: แอลกอฮอล์ 0% และ PPE ผ่านครบทุกชิ้น' + (mealConfig.enabled ? ' (รวมรับข้าวกล่อง)' : ''))
   }
 
   const getErrorMessage = (err: any): string => {
@@ -644,6 +754,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       notesStr = JSON.stringify({ ppe_details: ppeDetails })
     }
 
+    const isRowSafe = isRowAllPpePassed(st) && isAlcoholPassed(st.alc_result)
     const payload = {
       entry_date: date,
       contractor_id: contractor.id || null,
@@ -665,7 +776,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
       status: 'active' as const,
       is_blacklisted: false,
-      meal_allowance: !!st.meal_allowance,
+      meal_allowance: isRowSafe ? !!st.meal_allowance : false,
       notes: notesStr,
     }
 
@@ -757,7 +868,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
           status: 'active' as const,
           is_blacklisted: false,
-          meal_allowance: !!st.meal_allowance,
+          meal_allowance: (isRowAllPpePassed(st) && isAlcoholPassed(st.alc_result)) ? !!st.meal_allowance : false,
           notes: notesStr,
         }
 
@@ -780,16 +891,21 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
         }
       }
 
-      for (const u of updates) {
-        const res = await fetch(`/api/checklist/${u.id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(u.payload),
-        })
-        if (!res.ok) {
-          const errData = await res.json()
-          throw new Error(errData.error)
-        }
+      if (updates.length > 0) {
+        const updatePromises = updates.map(u =>
+          fetch(`/api/checklist/${u.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(u.payload),
+          }).then(async res => {
+            if (!res.ok) {
+              const errData = await res.json()
+              throw new Error(errData.error || 'อัปเดตไม่สำเร็จ')
+            }
+            return res
+          })
+        )
+        await Promise.all(updatePromises)
       }
 
       toast.success(`บันทึก Checklist ${currentTeamMembers.length} คนเรียบร้อยแล้ว`)
@@ -817,6 +933,14 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
         throw new Error(errData.error || 'ยกเลิกไม่สำเร็จ')
       }
       toast.info(`ยกเลิกผลการตรวจของ ${name} แล้ว`)
+      const contractor = contractors.find(c => c.name === name)
+      if (contractor) {
+        setRowStates(prev => {
+          const next = { ...prev }
+          delete next[contractor.id]
+          return next
+        })
+      }
       onRefreshEntries()
     } catch (err: unknown) {
       console.error('Delete entry error:', err)
@@ -928,7 +1052,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
       daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : (existingEntry?.daily_wage ?? null),
       status: 'active' as const,
       is_blacklisted: false,
-      meal_allowance: false,
+      meal_allowance: mealConfig.enabled ? true : false,
       notes: JSON.stringify({
         ppe_details: quickPpeDetails,
         ...(extractUserNote(existingEntry?.notes) ? { user_note: extractUserNote(existingEntry?.notes) } : {}),
@@ -977,7 +1101,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
   const handleQuickPassRemaining = async () => {
     const pending = currentTeamMembers.filter(c => !getEntryForContractor(c))
     if (pending.length === 0) {
-      toast.info('ทุกคนในสังกัดนี้ตรวจบันทึกครบแล้ว')
+      toast.info('ทุกคนในทีมนี้ตรวจบันทึกครบแล้ว')
       return
     }
 
@@ -1010,7 +1134,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           daily_wage: (memberWage !== null && memberWage !== undefined && !isNaN(memberWage)) ? memberWage : null,
           status: 'active' as const,
           is_blacklisted: false,
-          meal_allowance: false,
+          meal_allowance: mealConfig.enabled ? true : false,
           notes: JSON.stringify({
             ppe_details: row.ppe_details || defaultPpeDetails,
             ...(extractUserNote(row.notes) ? { user_note: extractUserNote(row.notes) } : {}),
@@ -1054,8 +1178,8 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
           <div className="bg-slate-200/90 border-b border-slate-300 p-2 shrink-0">
             <div className="flex items-center justify-between mb-1.5 px-0.5">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-800">
-                <Building2 className="w-4 h-4 text-blue-700" />
-                <span>สังกัด / บริษัท</span>
+                <Users className="w-4 h-4 text-blue-700" />
+                <span>ทีมช่าง</span>
               </div>
 
               <div className="flex items-center gap-1.5">
@@ -1300,6 +1424,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
 
                 const ppePassedCount = getRowPpePassedCount(st)
                 const isAllPpePassed = isRowAllPpePassed(st)
+                const isSafe = isAllPpePassed && isAlcoholPassed(st.alc_result)
                 const effectiveActivityId = st.activity_id || defaultActivityId
                 const tasksForMember = getTasksForActivity(effectiveActivityId)
                 const selectedTaskValue = st.activity_name || ''
@@ -1340,7 +1465,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                               )}
                             </div>
                             <p className="text-xs text-slate-500 font-normal truncate mt-0.5">
-                              {member.company_name || 'ไม่ระบุสังกัด'} •{' '}
+                              {member.company_name || 'ไม่ระบุทีม'} •{' '}
                               {cleanContractorPosition(member.position) || 'ช่างหน้างาน'}
                             </p>
                           </div>
@@ -1502,6 +1627,26 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                                 </button>
                               )
                             })}
+
+                            {/* Meal allowance Button in Mobile Card */}
+                            {mealConfig.enabled && (
+                              <button
+                                type="button"
+                                disabled={!isSafe}
+                                onClick={() => handleToggleMeal(member)}
+                                className={`flex items-center gap-1.5 py-1 px-2 rounded-lg border text-center transition-all active:scale-95 ${
+                                  !isSafe
+                                    ? 'opacity-30 cursor-not-allowed bg-slate-50 text-slate-400 border-slate-200'
+                                    : st.meal_allowance
+                                      ? 'bg-amber-500 text-white border-amber-600 font-bold shadow-2xs ring-2 ring-amber-300/50'
+                                      : 'bg-white text-slate-700 border-slate-300 hover:border-amber-400'
+                                }`}
+                                title={st.meal_allowance ? 'รับข้าวแล้ว (แตะเพื่อเปลี่ยน)' : 'ไม่รับข้าว (แตะเพื่อรับข้าว)'}
+                              >
+                                <span className="text-sm">🍱</span>
+                                <span className="text-xs font-semibold">{st.meal_allowance ? 'รับข้าว ✓' : 'ไม่รับข้าว'}</span>
+                              </button>
+                            )}
                           </div>
                         </div>
 
@@ -1666,13 +1811,13 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
             2. DESKTOP VIEW (SPREADSHEET GRID TABLE)
         ══════════════════════════════════════════════════════════════════════════ */
         <div className="flex flex-col lg:flex-row items-stretch border border-slate-300 rounded-lg overflow-hidden bg-white shadow-2xs flex-1 min-h-0 h-full">
-          {/* LEFT COLUMN: แถบสีเทาเลือกสังกัด / บริษัท */}
+          {/* LEFT COLUMN: แถบสีเทาเลือกทีมช่าง */}
           <aside className="w-full lg:w-64 xl:w-72 shrink-0 bg-slate-100 border-b lg:border-b-0 lg:border-r border-slate-300 flex flex-col h-full min-h-0">
             {/* Header of Left Column */}
             <div className="p-2.5 bg-slate-200/80 border-b border-slate-300 flex items-center justify-between shrink-0">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-900">
-                <Building2 className="w-4 h-4 text-slate-800" />
-                <span>สังกัด / บริษัท</span>
+                <Users className="w-4 h-4 text-slate-800" />
+                <span>ทีมช่าง</span>
               </div>
               <span className="text-xs font-normal px-2 py-0.5 rounded bg-white text-slate-900 border border-slate-300">
                 {affiliationList.length}
@@ -1685,7 +1830,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                 <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500 pointer-events-none" />
                 <input
                   type="text"
-                  placeholder="ค้นหาสังกัด..."
+                  placeholder="ค้นหาทีม..."
                   value={searchAffiliation}
                   onChange={e => setSearchAffiliation(e.target.value)}
                   className="w-full text-xs pl-8 pr-2.5 py-1.5 rounded border border-slate-300 bg-white text-slate-900 placeholder:text-slate-400 font-normal focus:outline-none focus:ring-1 focus:ring-blue-500"
@@ -1774,7 +1919,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
               {/* Left: Current Selection & Counts */}
               <div className="flex items-center gap-2">
                 <span className="font-semibold text-slate-950 text-xs">
-                  {selectedCompany === 'all' ? 'ทุกสังกัด' : selectedCompany}
+                  {selectedCompany === 'all' ? 'ทุกทีม' : selectedCompany}
                 </span>
                 <span className="text-slate-300 font-normal">|</span>
                 <span className="text-slate-700 text-xs font-normal">
@@ -1872,13 +2017,21 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
               <div className="flex items-center gap-2">
 
                 {mealConfig.enabled && (
-                  <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-50 text-amber-900 border border-amber-300 text-xs font-bold">
+                  <button
+                    type="button"
+                    onClick={bulkToggleMeal}
+                    title="คลิกเพื่อสลับรับข้าวกล่องให้ช่างที่ตรวจผ่านทุกคนในทีมนี้"
+                    className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 text-xs font-bold transition-all cursor-pointer shadow-2xs active:scale-95"
+                  >
                     <span>🍱</span>
                     <span>รับข้าว:</span>
                     <span className="font-mono text-amber-950 font-extrabold">
-                      {currentTeamMembers.filter(m => !!getRowState(m.id).meal_allowance).length} / {currentTeamMembers.length}
+                      {currentTeamMembers.filter(m => {
+                        const st = getRowState(m.id)
+                        return !!st.meal_allowance && isRowAllPpePassed(st) && isAlcoholPassed(st.alc_result)
+                      }).length} / {currentTeamMembers.length}
                     </span>
-                  </div>
+                  </button>
                 )}
 
                 <button
@@ -1979,7 +2132,7 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
                   {currentTeamMembers.length === 0 ? (
                     <tr>
                       <td colSpan={14 + (mealConfig.enabled ? 1 : 0)} className="py-10 text-center text-slate-500 text-xs font-normal">
-                        ไม่พบข้อมูลลูกทีมในสังกัดนี้
+                        ไม่พบข้อมูลลูกทีมในทีมนี้
                       </td>
                     </tr>
                   ) : (
@@ -2205,22 +2358,31 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
 
                           {/* MEAL ALLOWANCE CELL (When mealConfig.enabled === true) */}
                           {mealConfig.enabled && (
-                            <td className="py-1.5 px-1 text-center border-r border-slate-200 bg-amber-50/30">
+                            <td className={`py-1.5 px-1 text-center border-r border-slate-200 ${isSafe ? 'bg-amber-50/40' : 'bg-slate-50/50'}`}>
                               <button
                                 type="button"
-                                onClick={() => updateRow(member.id, { meal_allowance: !st.meal_allowance })}
-                                className={`w-6 h-6 rounded mx-auto border flex items-center justify-center transition-all cursor-pointer ${
-                                  st.meal_allowance
-                                    ? 'bg-amber-600 text-white border-amber-700 shadow-2xs font-bold'
-                                    : 'bg-white text-slate-300 border-slate-300 hover:border-amber-500 hover:text-amber-500'
+                                disabled={!isSafe}
+                                onClick={() => handleToggleMeal(member)}
+                                className={`w-6 h-6 rounded mx-auto border flex items-center justify-center transition-all ${
+                                  !isSafe
+                                    ? 'opacity-20 cursor-not-allowed bg-slate-100 border-slate-200 text-slate-300'
+                                    : st.meal_allowance
+                                      ? 'bg-amber-500 text-white border-amber-600 shadow-2xs font-bold cursor-pointer ring-2 ring-amber-300/50 active:scale-95'
+                                      : 'bg-white text-slate-400 border-slate-300 hover:border-amber-500 hover:bg-amber-50/50 cursor-pointer active:scale-95 group'
                                 }`}
-                                title={`เบี้ยเลี้ยงอาหาร: ${st.meal_allowance ? 'รับข้าว/เบิก' : 'ไม่ได้รับ (คลิกเพื่อเลือก)'}`}
+                                title={
+                                  !isSafe
+                                    ? 'ต้องผ่านการตรวจความปลอดภัย (ALC และ PPE ครบ) ก่อนจึงจะรับข้าวได้'
+                                    : st.meal_allowance
+                                      ? 'รับข้าวกล่องแล้ว (คลิกเพื่อยกเลิก)'
+                                      : 'คลิกเพื่อเลือกรับข้าวกล่อง'
+                                }
                               >
-                                {st.meal_allowance ? (
+                                {isSafe && st.meal_allowance ? (
                                   <Check className="w-4 h-4 stroke-[3]" />
-                                ) : (
-                                  <span className="text-[10px] select-none opacity-60">🍱</span>
-                                )}
+                                ) : isSafe ? (
+                                  <span className="text-[10px] select-none opacity-0 group-hover:opacity-40 transition-opacity">🍱</span>
+                                ) : null}
                               </button>
                             </td>
                           )}
@@ -2297,24 +2459,24 @@ export function QuickTeamChecklist({ date, entries, onRefreshEntries }: QuickTea
         </div>
       )}
 
-      {/* ── Dialog เพิ่มลูกทีมใหม่เข้าสังกัด (ใช้ร่วมกันทั้ง Mobile และ Desktop) ── */}
+      {/* ── Dialog เพิ่มลูกทีมใหม่เข้าทีม (ใช้ร่วมกันทั้ง Mobile และ Desktop) ── */}
       <Dialog open={newMemberOpen} onOpenChange={setNewMemberOpen}>
         <DialogContent className="sm:max-w-md">
           <form onSubmit={handleSaveNewMember}>
             <DialogHeader>
               <DialogTitle className="text-base font-semibold text-slate-800 flex items-center gap-2">
                 <Plus className="w-4 h-4 text-blue-600" />
-                เพิ่มลูกทีมใหม่เข้าสังกัด
+                เพิ่มลูกทีมใหม่เข้าทีม
               </DialogTitle>
             </DialogHeader>
 
             <div className="py-4 space-y-3">
               <div>
-                <label className="text-xs font-normal text-slate-700 mb-1 block">สังกัด / บริษัท</label>
+                <label className="text-xs font-normal text-slate-700 mb-1 block">ทีมช่าง</label>
                 <input
                   type="text"
                   disabled
-                  value={selectedCompany !== 'all' ? selectedCompany : 'ไม่ระบุสังกัด'}
+                  value={selectedCompany !== 'all' ? selectedCompany : 'ไม่ระบุทีม'}
                   className="w-full text-xs font-normal px-3 py-2 rounded border border-slate-200 bg-slate-100 text-slate-600"
                 />
               </div>

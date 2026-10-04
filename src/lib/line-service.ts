@@ -1,4 +1,4 @@
-import type { ChecklistEntry, Contractor, Company, Activity } from '@/lib/types'
+import type { ChecklistEntry, Contractor, Company, Activity, MealConfig } from '@/lib/types'
 import { isAlcoholPassed, cleanCompanyCode } from '@/lib/types'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
@@ -35,6 +35,7 @@ export interface CompanyProjectGroup {
   failedMembers: { name: string; reason: string; checkInTime?: string | null }[]
   checkedInMembers: { name: string; checkInTime?: string | null }[]
   membersDetails: MemberStatusDetail[]
+  mealCount?: number
 }
 
 export interface ActiveProjectRow {
@@ -59,6 +60,7 @@ export interface ActiveProjectRow {
     companyCode?: string | null
   }[]
   failedMembers: { name: string; reason: string; checkInTime?: string | null }[]
+  mealCount?: number
 }
 
 export interface InactiveCompanySummary {
@@ -93,6 +95,7 @@ export interface CompanySummary {
   checkedInMembers: { name: string; checkInTime?: string | null }[]
   membersDetails: MemberStatusDetail[]
   projects: CompanyProjectGroup[]
+  mealCount?: number
 }
 
 export interface DailyReportData {
@@ -104,6 +107,8 @@ export interface DailyReportData {
   totalAlcFailed: number
   totalPpeFailed: number
   totalMissing: number
+  totalMeals: number
+  mealsByCompany: Record<string, number>
   companies: CompanySummary[]
   activeProjectRows: ActiveProjectRow[]
   inactiveCompanies: InactiveCompanySummary[]
@@ -238,6 +243,7 @@ export function buildDailyReportData(
       let projFailed = 0
       let projAlcFailed = 0
       let projPpeFailed = 0
+      let projMeals = 0
       const projCheckedIn: { name: string; checkInTime?: string | null }[] = []
       const projLateOrReqs: {
         name: string
@@ -252,6 +258,10 @@ export function buildDailyReportData(
       projData.membersWithEntry.forEach(({ m, entry }) => {
         const timeStr = entry.check_in_time ? entry.check_in_time.substring(0, 5) : null
         projCheckedIn.push({ name: m.name, checkInTime: timeStr })
+
+        if (entry.meal_allowance) {
+          projMeals += 1
+        }
 
         if (entry.purpose && entry.purpose.trim()) {
           const reqItem = {
@@ -336,6 +346,7 @@ export function buildDailyReportData(
         failedMembers: projFailedList,
         checkedInMembers: projCheckedIn,
         membersDetails: projMembersDetails,
+        mealCount: projMeals,
       })
     })
 
@@ -343,6 +354,7 @@ export function buildDailyReportData(
     const compFailed = projectGroups.reduce((sum, p) => sum + p.failedCount, 0)
     const compAlcFailed = projectGroups.reduce((sum, p) => sum + p.alcCount, 0)
     const compPpeFailed = projectGroups.reduce((sum, p) => sum + p.ppeFailedCount, 0)
+    const compMealCount = projectGroups.reduce((sum, p) => sum + (p.mealCount || 0), 0)
 
     totalCheckedIn += compCheckedCount
     totalPassed += compPassed
@@ -377,6 +389,7 @@ export function buildDailyReportData(
       checkedInMembers: allCheckedIn,
       membersDetails: allMembersDetails,
       projects: projectGroups,
+      mealCount: compMealCount,
     })
   })
 
@@ -411,6 +424,7 @@ export function buildDailyReportData(
           lateOrRequestsCount: proj.lateOrRequestsCount,
           lateOrRequests: proj.lateOrRequests,
           failedMembers: proj.failedMembers,
+          mealCount: proj.mealCount,
         })
       })
     } else {
@@ -419,6 +433,14 @@ export function buildDailyReportData(
         companyCode: comp.companyCode,
         totalRegistered: comp.totalRegistered,
       })
+    }
+  })
+
+  const totalMeals = companySummaries.reduce((sum, c) => sum + (c.mealCount || 0), 0)
+  const mealsByCompany: Record<string, number> = {}
+  companySummaries.forEach(c => {
+    if (c.mealCount && c.mealCount > 0) {
+      mealsByCompany[c.companyName] = c.mealCount
     }
   })
 
@@ -431,29 +453,152 @@ export function buildDailyReportData(
     totalAlcFailed,
     totalPpeFailed,
     totalMissing,
+    totalMeals,
+    mealsByCompany,
     companies: companySummaries,
     activeProjectRows,
     inactiveCompanies,
   }
 }
 
+// ── Vercel Cron Fixed Rounds Definition & Helpers ──
+export interface RoundInfo {
+  slot: string
+  name: string
+  shortLabel: string
+  icon: string
+  headerTitle: string
+  description: string
+  color: string
+  bgColor: string
+  focusMeal?: boolean
+}
+
+export const VERCEL_CRON_ROUNDS: RoundInfo[] = [
+  {
+    slot: '08:50',
+    name: 'เช็คชื่อ & ตรวจความปลอดภัย (ครั้งที่ 1)',
+    shortLabel: 'เช็คครั้งแรก 08:50 น.',
+    icon: '🌅',
+    headerTitle: '🌅 เช็คชื่อ & ตรวจความปลอดภัย ครั้งที่ 1 (08:50 น.)',
+    description: 'สรุปยอดคนเข้างาน ตรวจความพร้อม PPE และแอลกอฮอล์ช่วงเช้า',
+    color: '#15803d',
+    bgColor: '#166534',
+  },
+  {
+    slot: '10:30',
+    name: 'เช็คชื่อ & ติดตามหน้างาน (ครั้งที่ 2)',
+    shortLabel: 'เช็คครั้งที่ 2 (10:30 น.)',
+    icon: '📋',
+    headerTitle: '📋 เช็คชื่อ & ติดตามหน้างาน ครั้งที่ 2 (10:30 น.)',
+    description: 'อัปเดตยอดคนเข้างานเพิ่มเติม ติดตามผู้มาสายและความคืบหน้าหน้างาน',
+    color: '#1d4ed8',
+    bgColor: '#1e40af',
+  },
+  {
+    slot: '14:30',
+    name: 'สรุปยอดสั่งข้าวกล่อง (กับข้าว)',
+    shortLabel: 'ตัดยอดข้าว 14:30 น.',
+    icon: '🍱',
+    headerTitle: '🍱 สรุปยอดสั่งข้าวกล่อง (กับข้าว)',
+    description: 'สรุปยอดข้าวกล่องประจำวันแยกตามทีมช่าง ตัดรอบส่งร้านอาหาร',
+    color: '#b45309',
+    bgColor: '#9a3412',
+    focusMeal: true,
+  },
+]
+
+export function getRoundInfo(slotOrTime?: string | null): RoundInfo {
+  let timeStr = slotOrTime ? slotOrTime.trim().substring(0, 5) : ''
+  if (!timeStr || !/^\d{1,2}:\d{2}/.test(timeStr)) {
+    const now = new Date()
+    const utcMs = now.getTime() + now.getTimezoneOffset() * 60000
+    const bkk = new Date(utcMs + 7 * 3600000)
+    timeStr = `${String(bkk.getHours()).padStart(2, '0')}:${String(bkk.getMinutes()).padStart(2, '0')}`
+  }
+
+  // 1. Exact match with configured Vercel cron rounds
+  const exact = VERCEL_CRON_ROUNDS.find(r => r.slot === timeStr)
+  if (exact) return exact
+
+  // 2. Fuzzy match based on time window
+  const [hStr, mStr] = timeStr.split(':')
+  const totalMinutes = parseInt(hStr, 10) * 60 + parseInt(mStr, 10)
+
+  // 07:00 - 09:30 -> morning kickoff round (เช็คครั้งแรก)
+  if (totalMinutes <= 9 * 60 + 30) {
+    return {
+      ...VERCEL_CRON_ROUNDS[0],
+      shortLabel: `เช็คครั้งแรก (${timeStr} น.)`,
+      headerTitle: `🌅 เช็คชื่อ & ตรวจความปลอดภัย ครั้งที่ 1 (${timeStr} น.)`,
+    }
+  }
+
+  // 09:31 - 12:30 -> follow-up round (เช็คครั้งที่ 2)
+  if (totalMinutes > 9 * 60 + 30 && totalMinutes <= 12 * 60 + 30) {
+    return {
+      ...VERCEL_CRON_ROUNDS[1],
+      shortLabel: `เช็คครั้งที่ 2 (${timeStr} น.)`,
+      headerTitle: `📋 เช็คชื่อ & ติดตามหน้างาน ครั้งที่ 2 (${timeStr} น.)`,
+    }
+  }
+
+  // 12:31 - 16:30 -> afternoon meal round (14:30 น. สั่งข้าวกล่อง)
+  if (totalMinutes > 12 * 60 + 30 && totalMinutes <= 16 * 60 + 30) {
+    return {
+      ...VERCEL_CRON_ROUNDS[2],
+      shortLabel: `สั่งข้าว (${timeStr} น.)`,
+      headerTitle: `🍱 สรุปยอดสั่งข้าวกล่อง (${timeStr} น.)`,
+    }
+  }
+
+
+
+  // 3. Fallback for manual or custom execution
+  return {
+    slot: timeStr,
+    name: `รอบอัปเดตหน้างาน (${timeStr} น.)`,
+    shortLabel: `อัปเดต ${timeStr} น.`,
+    icon: '📋',
+    headerTitle: `📋 สรุปรายงานหน้างานประจำวัน (${timeStr} น.)`,
+    description: 'รายงานสรุปสถานะการเข้างานและความปลอดภัยหน้างาน',
+    color: '#0f172a',
+    bgColor: '#1e293b',
+  }
+}
+
 /**
  * สร้างข้อความแจ้งเตือนสรุปประจำวัน (LINE Text Message)
  */
-export function formatDailyLineMessage(report: DailyReportData): string {
+export function formatDailyLineMessage(report: DailyReportData, slotOrTime?: string | null): string {
   let dText = report.date
   try {
     dText = format(new Date(report.date), 'EEEEที่ d MMMM yyyy', { locale: th })
   } catch {}
 
+  const round = getRoundInfo(slotOrTime)
   const totalRequests = report.companies.reduce((sum, c) => sum + c.lateOrRequests.length, 0)
   const lines: string[] = []
 
-  lines.push(`📋 [การเข้า-ออก และตรวจสอบความปลอดภัยประจำวัน]`)
+  lines.push(`📋 [${round.headerTitle}]`)
+  lines.push(`🎯 ${round.description}`)
   lines.push(`📅 วัน${dText}`)
   lines.push(`────────────────`)
   lines.push(`ทีมงานรวม ${report.totalPassed} | ไม่มา ${report.totalMissing} | ประสงค์ ${totalRequests}`)
   lines.push(`────────────────`)
+
+  // หากเป็นรอบตัดยอดสั่งข้าวกล่อง (10:30 น.) ให้แสดงส่วนสรุปยอดข้าวขึ้นก่อนอย่างเด่นชัด
+  if (round.focusMeal) {
+    lines.push(`🍱 *** ยอดสั่งข้าวกล่องกลางวัน: รวม ${report.totalMeals || 0} กล่อง ***`)
+    if (report.mealsByCompany && Object.keys(report.mealsByCompany).length > 0) {
+      Object.entries(report.mealsByCompany).forEach(([comp, count]) => {
+        lines.push(`   • ${comp}: ${count} กล่อง`)
+      })
+    } else {
+      lines.push(`   (ยังไม่มียอดสั่งข้าวในรอบนี้)`)
+    }
+    lines.push(`────────────────`)
+  }
 
   // 1. สรุปรายทีมที่ปฏิบัติงานจริง
   const activeCompanies = (report.companies || []).filter(c => c.checkedInCount > 0)
@@ -527,12 +672,23 @@ export function formatDailyLineMessage(report: DailyReportData): string {
     lines.push(`────────────────`)
   }
 
+  // 4. สรุปยอดสั่งข้าวกล่องประจำวัน (ถ้าไม่ได้แสดงที่ด้านบนไปแล้ว และมียอดข้าว)
+  if (!round.focusMeal && report.totalMeals && report.totalMeals > 0) {
+    lines.push(`🍱 สรุปยอดสั่งข้าวกล่อง: รวม ${report.totalMeals} กล่อง`)
+    if (report.mealsByCompany) {
+      Object.entries(report.mealsByCompany).forEach(([comp, count]) => {
+        lines.push(`   • ${comp}: ${count} กล่อง`)
+      })
+    }
+    lines.push(`────────────────`)
+  }
+
   const now = new Date()
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000
   const bkk = new Date(utcMs + 7 * 3600000)
   const bangkokTime = `${String(bkk.getHours()).padStart(2, '0')}:${String(bkk.getMinutes()).padStart(2, '0')} น.`
 
-  lines.push(`🕒 รายงานเมื่อ: ${bangkokTime}`)
+  lines.push(`🕒 รายงานเมื่อ: ${bangkokTime} (${round.shortLabel})`)
   lines.push(`🛡️ ระบบ SiteCheck PRO`)
 
   return lines.join('\n')
@@ -543,12 +699,13 @@ export function formatDailyLineMessage(report: DailyReportData): string {
  * - Bubble 1: การเข้า-ออก และตรวจสอบความปลอดภัยประจำวัน (Frame 2)
  * - Bubble 2: รายการแจ้งความประสงค์ (Frame 3)
  */
-export function buildDailyLineFlexMessage(report: DailyReportData): any {
+export function buildDailyLineFlexMessage(report: DailyReportData, slotOrTime?: string | null): any {
   let dText = report.date
   try {
     dText = format(new Date(report.date), 'd MMM yyyy', { locale: th })
   } catch {}
 
+  const round = getRoundInfo(slotOrTime)
   const now = new Date()
   const utcMs = now.getTime() + now.getTimezoneOffset() * 60000
   const bkk = new Date(utcMs + 7 * 3600000)
@@ -635,6 +792,7 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
     ],
   }
 
+
   // ══════════════════════════════════════════════════════════════════════════
   // Helper: วาดกล่องข้อมูลทีม (รองรับทั้งแบบโครงการเดียว และแยกหลายโครงการ)
   // ══════════════════════════════════════════════════════════════════════════
@@ -671,6 +829,17 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
             size: 'xs',
             weight: 'bold',
             color: '#2563eb',
+            flex: 0,
+          })
+        }
+
+        if (proj.mealCount && proj.mealCount > 0) {
+          statElements.push({
+            type: 'text',
+            text: `🍱 ข้าว ${proj.mealCount}`,
+            size: 'xs',
+            weight: 'bold',
+            color: '#b45309',
             flex: 0,
           })
         }
@@ -801,6 +970,10 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
       })
     }
 
+    if (comp.mealCount && comp.mealCount > 0) {
+      // meal stat removed — handled by Settings Flex card only
+    }
+
     return {
       type: 'box',
       layout: 'vertical',
@@ -870,16 +1043,47 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
       header: {
         type: 'box',
         layout: 'vertical',
-        backgroundColor: '#286b13',
+        backgroundColor: round.bgColor,
         paddingAll: '12px',
         contents: [
           {
+            type: 'box',
+            layout: 'horizontal',
+            alignItems: 'center',
+            contents: [
+              {
+                type: 'text',
+                text: round.shortLabel,
+                size: 'xxs',
+                weight: 'bold',
+                color: '#ffffff',
+                flex: 0,
+              },
+              {
+                type: 'text',
+                text: `🕒 ${currentTime}`,
+                size: 'xxs',
+                color: '#f8fafc',
+                align: 'end',
+              },
+            ],
+          },
+          {
             type: 'text',
-            text: 'การเข้า-ออก และตรวจสอบความปลอดภัยประจำวัน',
+            text: round.headerTitle,
             weight: 'bold',
             color: '#ffffff',
             size: 'xs',
             wrap: true,
+            margin: 'xs',
+          },
+          {
+            type: 'text',
+            text: round.description,
+            size: 'xxs',
+            color: '#f1f5f9',
+            wrap: true,
+            margin: 'xxs',
           },
         ],
       },
@@ -924,7 +1128,7 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
         contents: [
           {
             type: 'text',
-            text: `รายงานเมื่อ: ${currentTime} วันที่ ${dText}`,
+            text: `รายงานเมื่อ: ${currentTime} วันที่ ${dText} • ${round.shortLabel}`,
             size: 'xxs',
             color: '#64748b',
             align: 'center',
@@ -1018,16 +1222,50 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
         header: {
           type: 'box',
           layout: 'vertical',
-          backgroundColor: '#286b13',
+          backgroundColor: round.bgColor,
           paddingAll: '12px',
           contents: [
             {
+              type: 'box',
+              layout: 'horizontal',
+              alignItems: 'center',
+              contents: [
+                {
+                  type: 'text',
+                  text: round.shortLabel,
+                  size: 'xxs',
+                  weight: 'bold',
+                  color: '#ffffff',
+                  flex: 0,
+                },
+                {
+                  type: 'text',
+                  text: `🕒 ${currentTime}`,
+                  size: 'xxs',
+                  color: '#f8fafc',
+                  align: 'end',
+                },
+              ],
+            },
+            {
               type: 'text',
-              text: headerTitle,
+              text:
+                totalChunks > 1
+                  ? `${round.headerTitle} (${chunkIdx + 1}/${totalChunks})`
+                  : round.headerTitle,
               weight: 'bold',
               color: '#ffffff',
               size: 'xs',
               wrap: true,
+              margin: 'xs',
+            },
+            {
+              type: 'text',
+              text: round.description,
+              size: 'xxs',
+              color: '#f1f5f9',
+              wrap: true,
+              margin: 'xxs',
             },
           ],
         },
@@ -1046,7 +1284,7 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
           contents: [
             {
               type: 'text',
-              text: `รายงานเมื่อ: ${currentTime} วันที่ ${dText}`,
+              text: `รายงานเมื่อ: ${currentTime} วันที่ ${dText} • ${round.shortLabel}`,
               size: 'xxs',
               color: '#64748b',
               align: 'center',
@@ -1232,4 +1470,217 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
       contents: totalBubbles,
     },
   }
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 3. FLEX MESSAGE & TEXT GENERATOR: สรุปยอดสั่งข้าวกล่อง (รอบ 14:30 น.)
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * สร้าง LINE Flex Message สำหรับสรุปยอดสั่งข้าวกล่อง ยอดจริงแยกตามทีมช่าง
+ */
+export function buildMealLineFlexMessage(
+  report: DailyReportData,
+  mealConfig?: Partial<MealConfig> | null
+): any {
+  let dText = report.date
+  try {
+    dText = format(new Date(report.date), 'd MMMM yyyy', { locale: th })
+  } catch {}
+
+  const pricePerMeal = mealConfig?.price_per_meal ?? 60
+  const shopName = mealConfig?.catering_shop_name || 'ร้านข้าวประจำ'
+  const totalMeals = report.totalMeals || 0
+  const totalCost = totalMeals * pricePerMeal
+
+  // Build breakdown rows from real report.mealsByCompany
+  const breakdownRows = Object.entries(report.mealsByCompany || {}).map(([name, cnt], idx) => ({
+    type: 'box',
+    layout: 'horizontal',
+    justifyContent: 'space-between',
+    margin: idx === 0 ? 'none' : 'sm',
+    contents: [
+      { type: 'text', text: `${idx + 1}. ${name}`, size: 'sm', color: '#451a03', flex: 7, wrap: true },
+      { type: 'text', text: `${cnt} กล่อง`, size: 'sm', color: '#b45309', weight: 'bold', align: 'end', flex: 3 },
+    ],
+  }))
+
+  return {
+    type: 'flex',
+    altText: `🍱 สรุปยอดสั่งข้าวกล่อง ${totalMeals} กล่อง (ตัดยอด 14:30 น.)`,
+    contents: {
+      type: 'bubble',
+      size: 'mega',
+      header: {
+        type: 'box',
+        layout: 'vertical',
+        backgroundColor: '#9a3412',
+        paddingAll: '14px',
+        contents: [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            alignItems: 'center',
+            contents: [
+              { type: 'text', text: '🍱', size: 'md', flex: 0 },
+              {
+                type: 'text',
+                text: 'สรุปยอดสั่งข้าวกล่อง (กับข้าว)',
+                weight: 'bold',
+                color: '#ffffff',
+                size: 'sm',
+                flex: 7,
+                wrap: true,
+              },
+              { type: 'text', text: 'FLEX BUBBLE', size: 'xxs', color: '#fca5a5', align: 'end', flex: 3 },
+            ],
+          },
+          {
+            type: 'text',
+            text: `รอบ 14:30 น. • ${shopName}`,
+            size: 'xxs',
+            color: '#fecaca',
+            margin: 'xs',
+          },
+        ],
+      },
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '14px',
+        spacing: 'md',
+        contents: [
+          {
+            type: 'box',
+            layout: 'horizontal',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            contents: [
+              { type: 'text', text: 'ประจำวันที่:', size: 'sm', color: '#6b7280' },
+              { type: 'text', text: dText, size: 'sm', color: '#111827', weight: 'bold', align: 'end' },
+            ],
+          },
+          {
+            type: 'box',
+            layout: 'vertical',
+            backgroundColor: '#fffbeb',
+            borderColor: '#f59e0b',
+            borderWidth: '1.5px',
+            cornerRadius: '10px',
+            paddingAll: '12px',
+            contents: [
+              {
+                type: 'box',
+                layout: 'horizontal',
+                justifyContent: 'space-between',
+                alignItems: 'baseline',
+                contents: [
+                  {
+                    type: 'box',
+                    layout: 'vertical',
+                    contents: [
+                      { type: 'text', text: 'ยอดสั่งข้าวกล่องรวม', size: 'xs', color: '#92400e', weight: 'bold' },
+                      { type: 'text', text: `${totalMeals} กล่อง`, size: 'xxl', color: '#78350f', weight: 'bold' },
+                    ],
+                  },
+                  {
+                    type: 'box',
+                    layout: 'vertical',
+                    alignItems: 'flex-end',
+                    contents: [
+                      { type: 'text', text: `@${pricePerMeal} บาท/กล่อง`, size: 'xxs', color: '#b45309' },
+                      { type: 'text', text: `รวม ${totalCost.toLocaleString()} ฿`, size: 'sm', color: '#b45309', weight: 'bold' },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          ...(breakdownRows.length > 0
+            ? [
+                { type: 'text', text: 'รายละเอียดแยกตามทีมช่าง:', size: 'xs', color: '#374151', weight: 'bold', margin: 'none' },
+                {
+                  type: 'box',
+                  layout: 'vertical',
+                  backgroundColor: '#fafafa',
+                  cornerRadius: '8px',
+                  paddingAll: '10px',
+                  contents: breakdownRows,
+                },
+              ]
+            : [
+                {
+                  type: 'box',
+                  layout: 'vertical',
+                  backgroundColor: '#fef3c7',
+                  cornerRadius: '8px',
+                  paddingAll: '12px',
+                  alignItems: 'center',
+                  contents: [
+                    { type: 'text', text: '(ไม่มีรายการสั่งข้าวในวันนี้)', size: 'sm', color: '#92400e' },
+                  ],
+                },
+              ]),
+          {
+            type: 'box',
+            layout: 'horizontal',
+            backgroundColor: '#fef9c3',
+            cornerRadius: '6px',
+            paddingAll: '8px',
+            alignItems: 'center',
+            contents: [
+              { type: 'text', text: '⏰', size: 'xs', flex: 0 },
+              { type: 'text', text: 'กรุณาส่งก่อน 11:45 น.', size: 'xs', color: '#854d0e', weight: 'bold', margin: 'sm' },
+            ],
+          },
+        ],
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        paddingAll: '10px',
+        backgroundColor: '#f8fafc',
+        contents: [
+          {
+            type: 'text',
+            text: `ส่งอัตโนมัติ 14:30 น. วันที่ ${dText}`,
+            size: 'xxs',
+            color: '#64748b',
+            align: 'center',
+          },
+        ],
+      },
+    },
+  }
+}
+
+/**
+ * สร้างข้อความธรรมดา (Text) สำหรับสรุปยอดสั่งข้าวกล่อง (Telegram / Clipboard)
+ */
+export function formatMealLineTextMessage(
+  report: DailyReportData,
+  mealConfig?: Partial<MealConfig> | null
+): string {
+  let dText = report.date
+  try {
+    dText = format(new Date(report.date), 'd MMMM yyyy', { locale: th })
+  } catch {}
+
+  const pricePerMeal = mealConfig?.price_per_meal ?? 60
+  const totalMeals = report.totalMeals || 0
+  const totalCost = totalMeals * pricePerMeal
+
+  const breakdownText = Object.entries(report.mealsByCompany || {})
+    .map(([name, cnt], idx) => `   ${idx + 1}. ${name}: ${cnt} กล่อง`)
+    .join('\n')
+
+  return [
+    `🍱 [สรุปยอดสั่งข้าวกล่อง รอบ 14:30 น.]`,
+    `📅 ประจำวันที่: ${dText}`,
+    `──────────────────`,
+    `ยอดสั่งข้าวกล่องรวม: ${totalMeals} กล่อง (@${pricePerMeal} บาท = ${totalCost.toLocaleString()} บาท)`,
+    breakdownText || '   (ไม่มีรายการสั่งข้าวในวันนี้)',
+    `──────────────────`,
+    `⏰ กรุณาส่งก่อน 11:45 น.`,
+  ].join('\n')
 }

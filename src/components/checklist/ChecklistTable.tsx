@@ -154,7 +154,7 @@ export function ChecklistTable({ entries, loading, onDelete, showDate = false }:
                 <SortTh col="entry_date" label="วันที่" className="text-center min-w-[85px]" />
               )}
               <SortTh col="contractor_name" label="ชื่อลูกทีม / ผู้รับเหมา" className="min-w-[150px]" />
-              <SortTh col="company_name" label="สังกัด / บริษัท" className="min-w-[130px]" />
+              <SortTh col="company_name" label="ทีมช่าง" className="min-w-[130px]" />
               <th className="py-2 px-2.5 border-r border-slate-300 min-w-[90px] font-semibold">ผู้ควบคุม</th>
               <SortTh col="check_in_time" label="เวลาตรวจ" className="text-center min-w-[85px]" />
               <th className="py-2 px-2.5 border-r border-slate-300 min-w-[130px] font-semibold">งาน / กิจกรรม</th>

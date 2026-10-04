@@ -106,8 +106,8 @@ export default function ChecklistPage() {
               }`}
             >
               <Zap className={`w-3.5 h-3.5 ${activeTab === 'team' ? 'text-amber-500 fill-amber-400' : 'text-slate-500'}`} />
-              <span className="hidden sm:inline">ตรวจ Checklist ตามสังกัด</span>
-              <span className="sm:hidden">ตรวจตามสังกัด</span>
+              <span className="hidden sm:inline">ตรวจ Checklist ตามทีม</span>
+              <span className="sm:hidden">ตรวจตามทีม</span>
             </button>
 
             <button
@@ -221,7 +221,7 @@ export default function ChecklistPage() {
               <input
                 type="search"
                 className="w-full text-xs pl-8 pr-3 py-1 rounded border border-slate-300 bg-white focus:outline-none focus:ring-1 focus:ring-blue-500 text-slate-900 font-normal placeholder:text-slate-400"
-                placeholder="ค้นหาชื่อ, บริษัท, กิจกรรม..."
+                placeholder="ค้นหาชื่อ, ทีมช่าง, กิจกรรม..."
                 value={search}
                 onChange={e => setSearch(e.target.value)}
               />

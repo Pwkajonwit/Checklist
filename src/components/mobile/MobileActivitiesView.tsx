@@ -199,24 +199,6 @@ export function MobileActivitiesView() {
     }
   }
 
-  const handleToggleActive = async (a: Activity) => {
-    const nextActive = !a.is_active
-    try {
-      const { error } = await supabase
-        .from('activities')
-        .update({ is_active: nextActive })
-        .eq('id', a.id)
-
-      if (error) throw error
-      toast.success(nextActive ? `เปิดใช้งาน "${a.name}" แล้ว` : `ปิดใช้งาน "${a.name}" แล้ว`)
-      setActivities(prev =>
-        prev.map(item => (item.id === a.id ? { ...item, is_active: nextActive } : item))
-      )
-    } catch {
-      toast.error('ไม่สามารถเปลี่ยนสถานะได้')
-    }
-  }
-
   const handleDelete = async (id: string, name: string) => {
     if (!confirm(`ต้องการลบกิจกรรม "${name}" หรือไม่?`)) return
     try {
@@ -370,14 +352,26 @@ export function MobileActivitiesView() {
                             [{a.code}]
                           </span>
                         )}
+                        {!a.is_active && (
+                          <span className="px-1.5 py-0.5 rounded text-[11px] font-normal bg-slate-200 text-slate-700 border border-slate-300">
+                            ปิดใช้งาน
+                          </span>
+                        )}
                       </div>
 
-                      {a.location && (
-                        <span className="text-xs text-slate-700 font-normal flex items-center gap-1 mt-0.5">
-                          <MapPin className="w-3 h-3 text-slate-500" />
-                          {a.location}
-                        </span>
-                      )}
+                      <div className="flex items-center gap-2 text-xs text-slate-600 font-normal mt-0.5 flex-wrap">
+                        {a.location && (
+                          <span className="flex items-center gap-1 text-slate-700">
+                            <MapPin className="w-3 h-3 text-slate-500" />
+                            {a.location}
+                          </span>
+                        )}
+                        {tasksList.length > 0 && (
+                          <span className="text-purple-700 font-normal">
+                            {a.location ? '• ' : ''}{tasksList.length} ระบบงานย่อย
+                          </span>
+                        )}
+                      </div>
                     </div>
                   </div>
 
@@ -402,7 +396,7 @@ export function MobileActivitiesView() {
 
                 {/* Tasks Chips Row */}
                 {tasksList.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 items-center pt-0.5">
+                  <div className="flex flex-wrap gap-1.5 items-center pt-1 border-t border-slate-100">
                     {tasksList.map((t, idx) => (
                       <span
                         key={idx}
@@ -414,24 +408,6 @@ export function MobileActivitiesView() {
                     ))}
                   </div>
                 )}
-
-                {/* Status Switch Footer */}
-                <div className="flex items-center justify-between pt-1 border-t border-slate-200 text-xs">
-                  <span className="text-xs text-slate-600 font-normal">
-                    {tasksList.length} ระบบงานย่อย
-                  </span>
-
-                  <button
-                    onClick={() => handleToggleActive(a)}
-                    className={`text-xs font-semibold px-2.5 py-0.5 rounded-full border transition-all ${
-                      a.is_active
-                        ? 'bg-emerald-100 text-emerald-950 border-emerald-400 hover:bg-emerald-200'
-                        : 'bg-slate-200 text-slate-800 border-slate-300 hover:bg-slate-300'
-                    }`}
-                  >
-                    {a.is_active ? '● เปิดใช้งาน' : '○ ปิด'}
-                  </button>
-                </div>
               </div>
             )
           })

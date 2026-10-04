@@ -1,25 +1,30 @@
 'use client'
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { toast } from 'sonner'
 import { format } from 'date-fns'
 import { th } from 'date-fns/locale'
-import type { ChecklistEntry, Contractor, Company, Activity, NotificationConfig } from '@/lib/types'
-import { DEFAULT_NOTIFICATION_CONFIG } from '@/lib/types'
+import type { ChecklistEntry, Contractor, Company, Activity, NotificationConfig, MealConfig } from '@/lib/types'
+import { DEFAULT_NOTIFICATION_CONFIG, DEFAULT_MEAL_CONFIG } from '@/lib/types'
 import {
   buildDailyReportData,
   formatDailyLineMessage,
   buildDailyLineFlexMessage,
+  buildMealLineFlexMessage,
+  formatMealLineTextMessage,
+  getRoundInfo,
   DailyReportData,
   CompanySummary,
+  VERCEL_CRON_ROUNDS,
 } from '@/lib/line-service'
 import {
   MessageSquare, Send, Copy, Settings, RefreshCw, CalendarDays,
   Building2, Users, CheckCircle2, XCircle, AlertTriangle, Clock,
   Sparkles, Check, ChevronLeft, ChevronRight, ExternalLink, HelpCircle,
   Loader2, BellRing, Smartphone, ShieldAlert, Layers, Code, Eye,
-  Timer, Plus, Trash2, CheckCircle, Radio, SendHorizontal
+  Timer, Plus, Trash2, CheckCircle, Radio, SendHorizontal, UtensilsCrossed
 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -47,6 +52,7 @@ export default function LineOAPage() {
   // Message Format & Active Bubble Preview Index
   const [formatMode, setFormatMode] = useState<'flex' | 'text'>('flex')
   const [activeBubbleIdx, setActiveBubbleIdx] = useState<number>(0)
+  const [previewSlot, setPreviewSlot] = useState<string>('auto')
 
   // Unified Notification Settings Modal
   const [configOpen, setConfigOpen] = useState(false)
@@ -54,6 +60,10 @@ export default function LineOAPage() {
   const [config, setConfig] = useState<NotificationConfig>(DEFAULT_NOTIFICATION_CONFIG)
   const [newTimeInput, setNewTimeInput] = useState('09:00')
   const [savingSettings, setSavingSettings] = useState(false)
+
+  // Meal Allowance Settings & Copy State
+  const [mealConfig, setMealConfig] = useState<MealConfig>(DEFAULT_MEAL_CONFIG)
+  const [copiedMessage, setCopiedMessage] = useState(false)
 
   // Sending State
   const [sending, setSending] = useState(false)
@@ -145,6 +155,16 @@ export default function LineOAPage() {
     }
 
     loadConfig()
+
+    // 3. Fetch meal config for meal flex preview
+    fetch('/api/settings?id=meal_config&t=' + Date.now())
+      .then(r => r.json())
+      .then(json => {
+        if (json.data && typeof json.data === 'object') {
+          setMealConfig({ ...DEFAULT_MEAL_CONFIG, ...json.data })
+        }
+      })
+      .catch(err => console.warn('Load meal config error:', err))
   }, [])
 
   const saveConfig = async (newCfg: NotificationConfig) => {
@@ -223,12 +243,17 @@ export default function LineOAPage() {
 
   // Computed LINE Flex Message
   const flexMessage = useMemo(() => {
-    return buildDailyLineFlexMessage(report)
-  }, [report])
+    return buildDailyLineFlexMessage(report, previewSlot === 'auto' ? undefined : previewSlot)
+  }, [report, previewSlot])
 
   const flexBubbles = useMemo(() => {
     return (flexMessage?.contents?.contents as any[]) || []
   }, [flexMessage])
+
+  // Current round info for preview
+  const currentRound = useMemo(() => {
+    return getRoundInfo(previewSlot === 'auto' ? undefined : previewSlot)
+  }, [previewSlot])
 
   const activeCompanies = useMemo(() => {
     return (report.companies || []).filter(c => c.checkedInCount > 0)
@@ -241,8 +266,22 @@ export default function LineOAPage() {
 
   // Formatted Text Message
   const lineTextMessage = useMemo(() => {
-    return formatDailyLineMessage(report)
-  }, [report])
+    return formatDailyLineMessage(report, previewSlot === 'auto' ? undefined : previewSlot)
+  }, [report, previewSlot])
+
+  // Check if current active preview slot is the Meal Slot (14:30 น.)
+  const isMealSlot = useMemo(() => {
+    return currentRound.focusMeal || previewSlot === '14:30'
+  }, [currentRound.focusMeal, previewSlot])
+
+  // Computed Meal Flex Message & Text Message (ยอดสั่งข้าวจริง)
+  const mealFlexMessage = useMemo(() => {
+    return buildMealLineFlexMessage(report, mealConfig)
+  }, [report, mealConfig])
+
+  const mealTextMessage = useMemo(() => {
+    return formatMealLineTextMessage(report, mealConfig)
+  }, [report, mealConfig])
 
   // Filtered Companies for display
   const displayCompanies = useMemo(() => {
@@ -293,8 +332,11 @@ export default function LineOAPage() {
 
     setSending(true)
     try {
+      const activeTextMessage = isMealSlot ? mealTextMessage : lineTextMessage
+      const activeFlexMessage = isMealSlot ? mealFlexMessage : flexMessage
+
       const payload: any = {
-        message: lineTextMessage,
+        message: activeTextMessage,
         line_enabled: config.line_enabled,
         line_channel_access_token: config.line_channel_access_token,
         line_target_id: config.line_target_id,
@@ -305,7 +347,7 @@ export default function LineOAPage() {
       }
 
       if (formatMode === 'flex' && config.line_enabled) {
-        payload.flex = flexMessage
+        payload.flex = activeFlexMessage
       }
 
       const res = await fetch('/api/line/send', {
@@ -319,7 +361,9 @@ export default function LineOAPage() {
         throw new Error(data.error || 'ส่งข้อความไม่สำเร็จ')
       }
 
-      if (isAuto && slotTime) {
+      if (isMealSlot) {
+        toast.success(`🍱 ส่ง Flex สรุปยอดสั่งข้าวกล่อง ${report.totalMeals} กล่อง เรียบร้อยแล้ว!`)
+      } else if (isAuto && slotTime) {
         const slotKey = `${format(new Date(), 'yyyy-MM-dd')} ${slotTime}`
         setSentSlots(prev => {
           const updated = [...prev, slotKey]
@@ -340,7 +384,20 @@ export default function LineOAPage() {
     } finally {
       setSending(false)
     }
-  }, [config, formatMode, lineTextMessage, flexMessage])
+  }, [config, formatMode, isMealSlot, mealTextMessage, lineTextMessage, mealFlexMessage, flexMessage, report.totalMeals])
+
+  // Copy Message Handler (supports both Safety and Meal Flex)
+  const handleCopyMessage = async () => {
+    try {
+      const textToCopy = isMealSlot ? mealTextMessage : lineTextMessage
+      await navigator.clipboard.writeText(textToCopy)
+      setCopiedMessage(true)
+      toast.success(isMealSlot ? 'คัดลอกข้อความสั่งข้าวกล่องแล้ว! สามารถนำไปส่งในแชทร้านข้าวได้ทันที 📋' : 'คัดลอกข้อความสรุปแล้ว! 📋')
+      setTimeout(() => setCopiedMessage(false), 2200)
+    } catch {
+      toast.error('ไม่สามารถคัดลอกข้อความได้')
+    }
+  }
 
   // Keep local clock display updated
   useEffect(() => {
@@ -529,40 +586,32 @@ export default function LineOAPage() {
 
         {/* Right: Quick Action Buttons */}
         <div className="flex items-center gap-1.5 ml-auto flex-wrap">
-          {/* Unified Notification Settings Button */}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => {
-              fetch('/api/settings?id=notification_config')
-                .then(r => r.json())
-                .then(res => {
-                  if (res.data && typeof res.data === 'object') {
-                    setConfig(prev => ({ ...prev, ...res.data }))
-                  }
-                })
-                .catch(() => {})
-              fetchSchedulerStatus()
-              setConfigOpen(true)
-            }}
-            className="h-8 text-xs border-slate-300 text-slate-800 bg-white hover:bg-slate-50 gap-1.5 font-bold shadow-2xs"
+          {/* Unified Notification Settings Button (Links to Settings page) */}
+          <Link
+            href="/settings?tab=notification"
+            className="h-8 px-3 rounded-md border border-slate-300 text-slate-800 bg-white hover:bg-slate-50 flex items-center gap-1.5 text-xs font-bold shadow-2xs transition-colors"
+            title="ไปหน้าตั้งค่าการแจ้งเตือน LINE OA และรอบเวลาอัตโนมัติ"
           >
             <Settings className="w-3.5 h-3.5 text-slate-700" />
             <span>ตั้งค่าการแจ้งเตือน</span>
-          </Button>
+          </Link>
 
           <Button
             size="sm"
             onClick={() => dispatchSend(false)}
             disabled={sending || loading}
-            className="h-8 px-3.5 text-xs bg-emerald-600 hover:bg-emerald-700 text-white gap-1.5 font-bold shadow-2xs transition-colors"
+            className={`h-8 px-3.5 text-xs text-white gap-1.5 font-bold shadow-2xs transition-colors ${
+              isMealSlot ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
+            }`}
           >
             {sending ? (
               <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : isMealSlot ? (
+              <UtensilsCrossed className="w-3.5 h-3.5" />
             ) : (
               <Send className="w-3.5 h-3.5" />
             )}
-            <span>ส่งรายงานทันที</span>
+            <span>{isMealSlot ? `ส่ง Flex ข้าว (${report.totalMeals} กล่อง)` : 'ส่งรายงานทันที'}</span>
           </Button>
         </div>
       </div>
@@ -619,6 +668,42 @@ export default function LineOAPage() {
               </div>
             </div>
           </div>
+
+          {/* Meal Allowance Summary Banner in Left Column */}
+          {(isMealSlot || report.totalMeals > 0) && (
+            <div className={`p-2.5 rounded-lg border flex items-center justify-between gap-2 transition-all shrink-0 ${
+              isMealSlot ? 'bg-amber-50 border-amber-300 ring-1 ring-amber-300/50 shadow-2xs' : 'bg-amber-50/60 border-amber-200'
+            }`}>
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="w-7 h-7 rounded-lg bg-amber-600 text-white flex items-center justify-center font-bold text-xs shrink-0 shadow-2xs">
+                  🍱
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-bold text-amber-950">ยอดสั่งข้าวกล่องวันนี้ (ตัดยอด 14:30 น.)</span>
+                    <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-200 text-amber-900 shrink-0">
+                      {Object.keys(report.mealsByCompany).length} ทีมช่าง
+                    </span>
+                  </div>
+                  <span className="text-[11px] text-amber-800 truncate block">
+                    ยอดรวม <strong className="font-mono text-amber-950 font-extrabold">{report.totalMeals}</strong> กล่อง (@{mealConfig.price_per_meal} ฿) = <strong className="font-mono text-amber-950 font-extrabold">{(report.totalMeals * (mealConfig.price_per_meal || 60)).toLocaleString()}</strong> บาท
+                  </span>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setPreviewSlot('14:30')
+                  setActiveBubbleIdx(0)
+                }}
+                className={`h-7 px-2.5 rounded text-white text-[11px] font-bold shrink-0 transition-colors shadow-2xs ${
+                  isMealSlot ? 'bg-amber-800' : 'bg-amber-600 hover:bg-amber-700'
+                }`}
+              >
+                {isMealSlot ? 'กำลังแสดง' : 'ดู Flex ข้าว'}
+              </button>
+            </div>
+          )}
 
           {/* Company Breakdown Card List */}
           <div className="flex-1 border border-slate-300 rounded-lg bg-white overflow-hidden flex flex-col min-h-0 shadow-2xs">
@@ -805,8 +890,61 @@ export default function LineOAPage() {
               </div>
             </div>
 
-            {/* Bubble Selector (When in Flex mode) */}
-            {formatMode === 'flex' && (
+            {/* Round Preview Selector Bar (Vercel Cron 3 Rounds) */}
+            <div className="px-3 py-1.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between gap-2 overflow-x-auto shrink-0">
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">พรีวิวรอบ:</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreviewSlot('auto')
+                    setActiveBubbleIdx(0)
+                  }}
+                  className={`px-2 py-0.5 text-[11px] font-bold rounded transition-colors whitespace-nowrap ${
+                    previewSlot === 'auto'
+                      ? 'bg-slate-800 text-white shadow-2xs'
+                      : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-300'
+                  }`}
+                  title="แสดงตามเวลาปัจจุบัน"
+                >
+                  🕒 ตามเวลาจริง
+                </button>
+                {VERCEL_CRON_ROUNDS.map(r => (
+                  <button
+                    key={r.slot}
+                    type="button"
+                    onClick={() => {
+                      setPreviewSlot(r.slot)
+                      setActiveBubbleIdx(0)
+                    }}
+                    className={`px-2 py-0.5 text-[11px] font-bold rounded transition-colors whitespace-nowrap flex items-center gap-1 ${
+                      previewSlot === r.slot
+                        ? 'text-white shadow-2xs'
+                        : 'bg-white text-slate-700 hover:bg-slate-100 border border-slate-300'
+                    }`}
+                    style={previewSlot === r.slot ? { backgroundColor: r.bgColor } : undefined}
+                    title={r.description}
+                  >
+                    <span>{r.icon}</span>
+                    <span>{r.slot} น. ({r.focusMeal ? 'ตัดยอดข้าว' : r.slot === '08:50' ? 'เช้า' : 'ปิดเที่ยง'})</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Copy Message Button */}
+              <button
+                type="button"
+                onClick={handleCopyMessage}
+                className="px-2.5 py-1 text-xs font-bold rounded-md bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 flex items-center gap-1.5 shrink-0 shadow-2xs active:scale-95 transition-all"
+                title={isMealSlot ? 'คัดลอกข้อความสั่งข้าวกล่อง' : 'คัดลอกข้อความสรุป'}
+              >
+                {copiedMessage ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5 text-slate-600" />}
+                <span>{copiedMessage ? 'คัดลอกแล้ว!' : isMealSlot ? 'คัดลอกข้อความสั่งข้าว' : 'คัดลอกข้อความ'}</span>
+              </button>
+            </div>
+
+            {/* Bubble Selector (When in Flex mode and NOT meal slot) */}
+            {formatMode === 'flex' && !isMealSlot && (
               <div className="px-3 py-1.5 bg-slate-200/70 border-b border-slate-300 flex items-center justify-between shrink-0 overflow-x-auto">
                 <div className="flex items-center gap-1.5 flex-wrap">
                   {flexBubbles.map((_, bIdx) => {
@@ -843,15 +981,110 @@ export default function LineOAPage() {
               </div>
             )}
 
+            {/* Meal Slot Info Bar (When in Meal slot and Flex mode) */}
+            {formatMode === 'flex' && isMealSlot && (
+              <div className="px-3 py-1.5 bg-amber-100/80 border-b border-amber-300 flex items-center justify-between shrink-0">
+                <div className="flex items-center gap-2 text-xs font-bold text-amber-950">
+                  <span>🍱 การ์ดสรุปยอดสั่งข้าวกล่อง (ยอดจริงจาก Checklist วันนี้)</span>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-200 text-amber-950 font-mono text-[11px]">
+                    {report.totalMeals} กล่อง
+                  </span>
+                </div>
+                <span className="text-[11px] text-amber-800 font-medium">
+                  1 / 1 Bubble
+                </span>
+              </div>
+            )}
+
             {/* Preview Body */}
             <div className="flex-1 overflow-y-auto p-4 bg-[#748792]/20 flex flex-col items-center justify-start scrollbar-thin">
               {formatMode === 'flex' ? (
-                /* Authentic LINE Flex Bubble (Multi-Bubble Overview or Requests) */
-                activeBubbleIdx < totalOverviewChunks ? (
-                  /* ── Bubble สรุปการเข้างานและความปลอดภัย ── */
-                  <div className="w-full max-w-[380px] bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden text-slate-900">
-                    {/* Green Header */}
-                    <div className="bg-[#286b13] p-3 text-white">
+                isMealSlot ? (
+                  /* ── Authentic LINE Flex Bubble: สรุปยอดสั่งข้าวกล่อง (Meal Allowance) ── */
+                  <div className="w-full max-w-[380px] bg-white rounded-2xl shadow-md border border-amber-300 overflow-hidden text-slate-900 animate-in fade-in duration-150">
+                    {/* Header */}
+                    <div className="p-3.5 text-white bg-[#9a3412]">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-base">🍱</span>
+                          <h4 className="text-xs font-bold leading-tight">
+                            สรุปยอดสั่งข้าวกล่อง (กับข้าว)
+                          </h4>
+                        </div>
+                        <span className="text-[9px] text-amber-200 uppercase font-mono font-bold px-1.5 py-0.5 rounded bg-amber-900/60">FLEX BUBBLE</span>
+                      </div>
+                      <p className="text-[10px] text-amber-100 mt-1">
+                        รอบ 14:30 น. • {mealConfig.catering_shop_name || 'ร้านข้าวประจำ'}
+                      </p>
+                    </div>
+
+                    {/* Body */}
+                    <div className="p-3.5 space-y-3">
+                      <div className="flex items-center justify-between text-xs pb-1 border-b border-slate-100">
+                        <span className="text-slate-500 font-medium">ประจำวันที่:</span>
+                        <span className="font-bold text-slate-900">
+                          {format(new Date(date), 'd MMMM yyyy', { locale: th })}
+                        </span>
+                      </div>
+
+                      {/* Big Total Order Pill */}
+                      <div className="p-3 bg-amber-50/90 border border-amber-300 rounded-xl flex items-center justify-between">
+                        <div>
+                          <span className="text-[10px] font-bold text-amber-800 block">ยอดสั่งข้าวกล่องรวม</span>
+                          <span className="text-2xl font-extrabold text-amber-950 font-mono">
+                            {report.totalMeals} <span className="text-sm font-semibold">กล่อง</span>
+                          </span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-amber-700 block">
+                            @{mealConfig.price_per_meal} บาท/กล่อง
+                          </span>
+                          <span className="text-sm font-bold text-amber-900 font-mono">
+                            รวม {(report.totalMeals * (mealConfig.price_per_meal || 60)).toLocaleString()} ฿
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Breakdown List by Team */}
+                      <div className="space-y-1.5 pt-0.5 text-xs">
+                        <span className="text-[11px] font-bold text-slate-700 block">
+                          รายละเอียดแยกตามทีมช่าง:
+                        </span>
+                        {Object.keys(report.mealsByCompany).length > 0 ? (
+                          <div className="space-y-1 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                            {Object.entries(report.mealsByCompany).map(([name, cnt], idx) => (
+                              <div key={name} className="flex items-center justify-between text-xs py-0.5 border-b border-slate-100 last:border-none">
+                                <span className="text-slate-800 font-medium">{idx + 1}. {name}</span>
+                                <span className="font-bold text-amber-800 font-mono">{cnt} กล่อง</span>
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <div className="p-3 bg-amber-50/50 rounded-lg text-center text-xs text-amber-800 border border-amber-200">
+                            (ไม่มีรายการสั่งข้าวกล่องในวันนี้)
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Note */}
+                      <div className="p-2 rounded-lg bg-amber-100/70 text-amber-900 text-[11px] font-medium flex items-center gap-1.5">
+                        <span>⏰</span>
+                        <span>กรุณาส่งก่อน 11:45 น. ขอบคุณครับ</span>
+                      </div>
+                    </div>
+
+                    {/* Footer */}
+                    <div className="p-2.5 bg-slate-50 border-t border-slate-200 text-center text-[10px] text-slate-400">
+                      ส่งอัตโนมัติ 14:30 น. วันที่ {format(new Date(date), 'd MMM yyyy', { locale: th })}
+                    </div>
+                  </div>
+                ) : (
+                  /* Authentic LINE Flex Bubble (Multi-Bubble Overview or Requests) */
+                  activeBubbleIdx < totalOverviewChunks ? (
+                    /* ── Bubble สรุปการเข้างานและความปลอดภัย ── */
+                    <div className="w-full max-w-[380px] bg-white rounded-2xl shadow-md border border-slate-200 overflow-hidden text-slate-900">
+                    {/* Header — colour changes by round */}
+                    <div className="p-3 text-white" style={{ backgroundColor: currentRound.bgColor }}>
                       <h4 className="text-xs font-bold leading-tight">
                         {totalOverviewChunks > 1
                           ? `การเข้า-ออก และตรวจสอบความปลอดภัย (${activeBubbleIdx + 1}/${totalOverviewChunks})`
@@ -1106,10 +1339,10 @@ export default function LineOAPage() {
                     </div>
                   </div>
                 )
-              ) : (
+              )) : (
                 /* Plain Text / Telegram Preview */
                 <div className="w-full max-w-lg bg-white rounded-xl p-4 shadow-sm border border-slate-300 font-mono text-xs whitespace-pre-wrap text-slate-800 leading-relaxed select-all">
-                  {lineTextMessage}
+                  {isMealSlot ? mealTextMessage : lineTextMessage}
                 </div>
               )}
             </div>

@@ -98,12 +98,176 @@ export function getContractorDailyWage(c?: Partial<Contractor> | null): number |
   return null
 }
 
+export interface ContractorCertifications {
+  insee_training_exp?: string | null
+  boomlift_training_exp?: string | null
+}
+
+export interface ContractorDocuments {
+  id_card: boolean        // บัตรประชาชน
+  house_reg: boolean      // ทะเบียนบ้าน
+  medical_cert: boolean   // ใบรับรองแพทย์
+  social_security: boolean // ประกันสังคม
+  consent_form: boolean   // ใบยินยอม
+}
+
+export const REQUIRED_DOCUMENT_LIST = [
+  { id: 'id_card', label: 'บัตรประชาชน', shortLabel: 'บัตร ปชช.' },
+  { id: 'house_reg', label: 'ทะเบียนบ้าน', shortLabel: 'ทะเบียนบ้าน' },
+  { id: 'medical_cert', label: 'ใบรับรองแพทย์', shortLabel: 'ใบรับรองแพทย์' },
+  { id: 'social_security', label: 'ประกันสังคม', shortLabel: 'ประกันสังคม' },
+  { id: 'consent_form', label: 'ใบยินยอม', shortLabel: 'ใบยินยอม' },
+] as const
+
+export const DEFAULT_CONTRACTOR_DOCUMENTS: ContractorDocuments = {
+  id_card: false,
+  house_reg: false,
+  medical_cert: false,
+  social_security: false,
+  consent_form: false,
+}
+
+export const DEFAULT_CONTRACTOR_CERTIFICATIONS: ContractorCertifications = {
+  insee_training_exp: null,
+  boomlift_training_exp: null,
+}
+
 export function cleanContractorPosition(pos?: string | null): string {
   if (!pos) return ''
   return pos
     .replace(/\[(?:เสี่ยง ALC|ALC_RISK|ALC)\]/gi, '')
     .replace(/\[(?:ค่าแรง|WAGE):?\s*\d+\]/gi, '')
+    .replace(/\[(?:INSEE_EXP|INSEE):?[^\]]*\]/gi, '')
+    .replace(/\[(?:BOOMLIFT_EXP|BOOMLIFT):?[^\]]*\]/gi, '')
+    .replace(/\[(?:DOCS|DOCUMENTS):?[^\]]*\]/gi, '')
     .trim()
+}
+
+export function getContractorCertifications(c?: Partial<Contractor> | null): ContractorCertifications {
+  if (!c) return { ...DEFAULT_CONTRACTOR_CERTIFICATIONS }
+  
+  let insee: string | null = null
+  let boomlift: string | null = null
+
+  if (c.position) {
+    const inseeMatch = c.position.match(/\[(?:INSEE_EXP|INSEE):?\s*([^\]]+)\]/i)
+    if (inseeMatch && inseeMatch[1].trim()) insee = inseeMatch[1].trim()
+
+    const boomMatch = c.position.match(/\[(?:BOOMLIFT_EXP|BOOMLIFT):?\s*([^\]]+)\]/i)
+    if (boomMatch && boomMatch[1].trim()) boomlift = boomMatch[1].trim()
+  }
+
+  return {
+    insee_training_exp: insee,
+    boomlift_training_exp: boomlift,
+  }
+}
+
+export function getContractorDocuments(c?: Partial<Contractor> | null): ContractorDocuments {
+  if (!c) return { ...DEFAULT_CONTRACTOR_DOCUMENTS }
+
+  const docs = { ...DEFAULT_CONTRACTOR_DOCUMENTS }
+
+  if (c.position) {
+    const docsMatch = c.position.match(/\[(?:DOCS|DOCUMENTS):?\s*([^\]]+)\]/i)
+    if (docsMatch && docsMatch[1]) {
+      const tokens = docsMatch[1].split(',').map(s => s.trim().toLowerCase())
+      docs.id_card = tokens.includes('id_card') || tokens.includes('id')
+      docs.house_reg = tokens.includes('house_reg') || tokens.includes('house')
+      docs.medical_cert = tokens.includes('medical_cert') || tokens.includes('medical')
+      docs.social_security = tokens.includes('social_security') || tokens.includes('social')
+      docs.consent_form = tokens.includes('consent_form') || tokens.includes('consent')
+    }
+  }
+
+  return docs
+}
+
+export function getTrainingExpiryStatus(expDateStr?: string | null): {
+  status: 'none' | 'valid' | 'expiring_soon' | 'expired'
+  daysLeft?: number
+  label: string
+} {
+  if (!expDateStr || !expDateStr.trim()) {
+    return { status: 'none', label: 'ไม่ได้ระบุ' }
+  }
+
+  // Parse YYYY-MM-DD
+  const parts = expDateStr.trim().split('-').map(Number)
+  if (parts.length < 3 || isNaN(parts[0]) || isNaN(parts[1]) || isNaN(parts[2])) {
+    return { status: 'none', label: 'วันที่ไม่ถูกต้อง' }
+  }
+
+  const expDate = new Date(parts[0], parts[1] - 1, parts[2])
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  expDate.setHours(0, 0, 0, 0)
+
+  const diffMs = expDate.getTime() - today.getTime()
+  const daysLeft = Math.ceil(diffMs / (1000 * 60 * 60 * 24))
+
+  if (daysLeft < 0) {
+    return { status: 'expired', daysLeft, label: `หมดอายุแล้ว (${Math.abs(daysLeft)} วัน)` }
+  } else if (daysLeft <= 30) {
+    return { status: 'expiring_soon', daysLeft, label: `ใกล้หมดอายุ (เหลือ ${daysLeft} วัน)` }
+  } else {
+    return { status: 'valid', daysLeft, label: `ปกติ (เหลือ ${daysLeft} วัน)` }
+  }
+}
+
+export function getDocumentStats(docs: ContractorDocuments): {
+  completedCount: number
+  totalCount: number
+  isComplete: boolean
+  missingItems: Array<{ id: string; label: string; shortLabel: string }>
+} {
+  const missingItems = REQUIRED_DOCUMENT_LIST.filter(item => !docs[item.id as keyof ContractorDocuments])
+  const completedCount = REQUIRED_DOCUMENT_LIST.length - missingItems.length
+  return {
+    completedCount,
+    totalCount: REQUIRED_DOCUMENT_LIST.length,
+    isComplete: completedCount === REQUIRED_DOCUMENT_LIST.length,
+    missingItems: missingItems.map(m => ({ id: m.id, label: m.label, shortLabel: m.shortLabel })),
+  }
+}
+
+export function formatContractorPositionPayload(
+  cleanPosition?: string | null,
+  options?: {
+    dailyWage?: number | null
+    alcRisk?: boolean | null
+    certifications?: ContractorCertifications | null
+    documents?: ContractorDocuments | null
+  }
+): string | null {
+  const base = cleanContractorPosition(cleanPosition) || ''
+  const tags: string[] = []
+
+  if (options?.alcRisk) {
+    tags.push('[เสี่ยง ALC]')
+  }
+  if (options?.dailyWage !== undefined && options?.dailyWage !== null && !isNaN(options?.dailyWage)) {
+    tags.push(`[ค่าแรง:${options.dailyWage}]`)
+  }
+  if (options?.certifications?.insee_training_exp?.trim()) {
+    tags.push(`[INSEE_EXP:${options.certifications.insee_training_exp.trim()}]`)
+  }
+  if (options?.certifications?.boomlift_training_exp?.trim()) {
+    tags.push(`[BOOMLIFT_EXP:${options.certifications.boomlift_training_exp.trim()}]`)
+  }
+  if (options?.documents) {
+    const obtained = REQUIRED_DOCUMENT_LIST
+      .filter(item => options.documents![item.id as keyof ContractorDocuments])
+      .map(item => item.id)
+    if (obtained.length > 0) {
+      tags.push(`[DOCS:${obtained.join(',')}]`)
+    } else {
+      tags.push('[DOCS:none]')
+    }
+  }
+
+  if (tags.length === 0) return base || null
+  return `${base} ${tags.join(' ')}`.trim()
 }
 
 export interface Activity {
@@ -295,7 +459,7 @@ export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
   telegram_bot_token: '',
   telegram_chat_id: '',
   schedule_enabled: true,
-  schedule_times: ['08:50', '10:30'],
+  schedule_times: ['08:50', '10:30', '14:30'],
   schedule_mode: 'flex',
   cron_secret: 'sitecheck-cron-secret',
 }
@@ -306,7 +470,7 @@ export interface MealConfig {
   price_per_meal: number      // อัตราค่าอาหารต่อคน/มื้อ (บาท) เช่น 60
   allow_ot_dinner: boolean    // เปิดตัวเลือกมื้อเย็น/OT หรือไม่
   ot_price_per_meal: number   // อัตราค่าอาหารมื้อเย็น/OT (บาท) เช่น 70
-  cut_off_time: string        // เวลาตัดรอบสรุปยอดสั่งข้าว เช่น '10:00'
+  cut_off_time: string        // เวลาตัดรอบสรุปยอดสั่งข้าว เช่น '14:30'
   catering_shop_name?: string // ชื่อร้านข้าวประจำ
   catering_phone?: string     // เบอร์โทรร้านข้าว
   line_notify_template?: string // ข้อความสำหรับส่งไลน์สั่งข้าว
@@ -317,7 +481,7 @@ export const DEFAULT_MEAL_CONFIG: MealConfig = {
   price_per_meal: 60,
   allow_ot_dinner: false,
   ot_price_per_meal: 70,
-  cut_off_time: '10:00',
+  cut_off_time: '14:30',
   catering_shop_name: '',
   catering_phone: '',
   line_notify_template: '🍱 สรุปยอดสั่งข้าวกล่อง โครงการ\nประจำวันที่: {date}\nรวมทั้งหมด: {total} กล่อง\n{breakdown}\n\nกรุณาส่งก่อน 11:45 น. ขอบคุณครับ',

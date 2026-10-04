@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Zap, BarChart3, Clock, TrendingUp, MapPin } from 'lucide-react'
+import { Zap, BarChart3, Clock, TrendingUp, MapPin, Award } from 'lucide-react'
 import { TodayView } from './TodayView'
 import { AnalyticsView } from './AnalyticsView'
 import { LocationBreakdownView } from './LocationBreakdownView'
+import { SafetyScoreView } from './SafetyScoreView'
 import type { ChecklistEntry, MealConfig } from '@/lib/types'
 import { DEFAULT_MEAL_CONFIG } from '@/lib/types'
 import { format } from 'date-fns'
@@ -26,7 +27,7 @@ interface DashboardClientProps {
 }
 
 export function DashboardClient({ todayThai, todayData }: DashboardClientProps) {
-  const [activeTab, setActiveTab] = useState<'today' | 'locations' | 'analytics'>('today')
+  const [activeTab, setActiveTab] = useState<'today' | 'locations' | 'analytics' | 'safety'>('today')
   const [mealConfig, setMealConfig] = useState<MealConfig>(DEFAULT_MEAL_CONFIG)
 
   useEffect(() => {
@@ -53,23 +54,23 @@ export function DashboardClient({ todayThai, todayData }: DashboardClientProps) 
       <div className="p-1.5 bg-white rounded-lg border border-slate-300 shadow-2xs flex items-center justify-between gap-2 shrink-0">
         
         {/* Tab Buttons Strip */}
-        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-md border border-slate-200">
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-md border border-slate-300">
           
           {/* Tab 1: หน้างานวันนี้ */}
           <button
             onClick={() => setActiveTab('today')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
               activeTab === 'today'
-                ? 'bg-white text-blue-700 shadow-xs border border-slate-200/80'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                ? 'bg-white text-blue-700 shadow-xs border border-slate-300'
+                : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
             }`}
           >
-            <Zap className={`w-3.5 h-3.5 ${activeTab === 'today' ? 'text-blue-600 fill-blue-600' : 'text-slate-400'}`} />
+            <Zap className={`w-3.5 h-3.5 ${activeTab === 'today' ? 'text-blue-600 fill-blue-600' : 'text-slate-500'}`} />
             <span>หน้างานวันนี้ (Today Ops)</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+            <span className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${
               activeTab === 'today'
-                ? 'bg-blue-100 text-blue-800 font-bold'
-                : 'bg-slate-200 text-slate-600'
+                ? 'bg-blue-100 text-blue-900'
+                : 'bg-slate-200 text-slate-700'
             }`}>
               {todayData.total}
             </span>
@@ -78,18 +79,18 @@ export function DashboardClient({ todayThai, todayData }: DashboardClientProps) 
           {/* Tab 2: สรุปรายจุดทำงาน (Locations) */}
           <button
             onClick={() => setActiveTab('locations')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
               activeTab === 'locations'
-                ? 'bg-white text-sky-700 shadow-xs border border-slate-200/80'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                ? 'bg-white text-sky-800 shadow-xs border border-slate-300'
+                : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
             }`}
           >
-            <MapPin className={`w-3.5 h-3.5 ${activeTab === 'locations' ? 'text-sky-600' : 'text-slate-400'}`} />
+            <MapPin className={`w-3.5 h-3.5 ${activeTab === 'locations' ? 'text-sky-600' : 'text-slate-500'}`} />
             <span>สรุปรายจุดทำงาน (Locations)</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold ${
+            <span className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold ${
               activeTab === 'locations'
-                ? 'bg-sky-100 text-sky-800'
-                : 'bg-slate-200 text-slate-600'
+                ? 'bg-sky-100 text-sky-900'
+                : 'bg-slate-200 text-slate-700'
             }`}>
               {locationCount} จุด
             </span>
@@ -98,20 +99,40 @@ export function DashboardClient({ todayThai, todayData }: DashboardClientProps) 
           {/* Tab 3: ภาพรวมวิเคราะห์ (Analytics) */}
           <button
             onClick={() => setActiveTab('analytics')}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
               activeTab === 'analytics'
-                ? 'bg-white text-indigo-700 shadow-xs border border-slate-200/80'
-                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                ? 'bg-white text-indigo-800 shadow-xs border border-slate-300'
+                : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
             }`}
           >
-            <BarChart3 className={`w-3.5 h-3.5 ${activeTab === 'analytics' ? 'text-indigo-600' : 'text-slate-400'}`} />
+            <BarChart3 className={`w-3.5 h-3.5 ${activeTab === 'analytics' ? 'text-indigo-600' : 'text-slate-500'}`} />
             <span>ภาพรวมวิเคราะห์ (Analytics)</span>
-            <span className={`px-1.5 py-0.2 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+            <span className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold uppercase tracking-wider ${
               activeTab === 'analytics'
-                ? 'bg-indigo-100 text-indigo-800'
-                : 'bg-indigo-50 text-indigo-600 border border-indigo-200'
+                ? 'bg-indigo-100 text-indigo-900'
+                : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
             }`}>
               Insight
+            </span>
+          </button>
+
+          {/* Tab 4: คะแนนวินัย (Safety Score) */}
+          <button
+            onClick={() => setActiveTab('safety')}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-xs font-bold transition-all cursor-pointer ${
+              activeTab === 'safety'
+                ? 'bg-white text-emerald-800 shadow-xs border border-slate-300'
+                : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200'
+            }`}
+          >
+            <Award className={`w-3.5 h-3.5 ${activeTab === 'safety' ? 'text-emerald-600' : 'text-slate-500'}`} />
+            <span>คะแนนวินัย (Safety Score)</span>
+            <span className={`px-1.5 py-0.2 rounded-full text-[11px] font-bold uppercase tracking-wider ${
+              activeTab === 'safety'
+                ? 'bg-emerald-100 text-emerald-900'
+                : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+            }`}>
+              +1/-5
             </span>
           </button>
 
@@ -137,6 +158,12 @@ export function DashboardClient({ todayThai, todayData }: DashboardClientProps) 
               <span>วิเคราะห์ภาระงานแต่ละทีม, กำลังพลสะสม, สัดส่วนระบบงาน และสถิติความปลอดภัย</span>
             </div>
           )}
+          {activeTab === 'safety' && (
+            <div className="flex items-center gap-1.5 text-emerald-700 text-[11px] font-medium">
+              <Award className="w-3.5 h-3.5 text-emerald-600" />
+              <span>ระบบจัดอันดับคะแนนวินัย: ตรวจผ่านครบ +1 แต้ม/วัน | ไม่ผ่าน (ALC/PPE) -5 แต้ม</span>
+            </div>
+          )}
         </div>
 
       </div>
@@ -156,6 +183,9 @@ export function DashboardClient({ todayThai, todayData }: DashboardClientProps) 
         )}
         {activeTab === 'analytics' && (
           <AnalyticsView mealConfig={mealConfig} />
+        )}
+        {activeTab === 'safety' && (
+          <SafetyScoreView />
         )}
       </div>
 

@@ -256,49 +256,49 @@ export function LocationBreakdownView({
   }
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 h-full gap-2.5 overflow-hidden">
+    <div className="flex flex-col flex-1 min-h-0 h-full gap-2 overflow-hidden">
       
-      {/* ── Toolbar: Date Picker, Search, Filter & Quick Copy ── */}
-      <div className="p-2.5 bg-white rounded-lg border border-slate-300 shadow-2xs flex flex-wrap items-center justify-between gap-2.5 shrink-0">
+      {/* ── Toolbar: Date Picker, Search, Filter & Quick Copy (ความสูง h-9) ── */}
+      <div className="p-2 bg-white rounded-lg border border-slate-300 shadow-2xs flex flex-wrap items-center justify-between gap-2 shrink-0">
         
-        {/* Left: Date selector & search */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-sky-50 text-sky-800 text-xs font-bold border border-sky-200 shrink-0">
-            <MapPin className="w-3.5 h-3.5 text-sky-600" />
+        {/* Left: Date selector & search (h-9) */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <div className="h-9 flex items-center gap-1.5 px-3 rounded-lg bg-sky-50 text-sky-900 text-xs font-bold border border-sky-300 shrink-0">
+            <MapPin className="w-3.5 h-3.5 text-sky-700" />
             <span>สรุปตามจุดปฏิบัติงาน</span>
           </div>
 
-          {/* Date Picker */}
-          <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-200 bg-slate-50 text-xs">
-            <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          {/* Date Picker: h-9 */}
+          <div className="h-9 flex items-center gap-1.5 px-2.5 rounded-lg border border-slate-300 bg-white text-xs">
+            <Calendar className="w-3.5 h-3.5 text-slate-500 shrink-0" />
             <input
               type="date"
               value={selectedDate}
               onChange={e => setSelectedDate(e.target.value)}
-              className="text-xs font-bold text-slate-800 bg-transparent border-none outline-none cursor-pointer"
+              className="text-xs font-semibold text-slate-900 bg-transparent border-none outline-none cursor-pointer"
             />
           </div>
 
-          {/* Search location or contractor */}
-          <div className="relative w-44 sm:w-56">
-            <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+          {/* Search location or contractor: h-9 */}
+          <div className="relative w-44 sm:w-56 h-9 flex items-center">
+            <Search className="w-3.5 h-3.5 absolute left-2.5 text-slate-500 pointer-events-none" />
             <input
               type="search"
-              placeholder="ค้นหาจุดทำงาน, ชื่อช่าง, สังกัด..."
+              placeholder="ค้นหาจุดทำงาน, ชื่อช่าง..."
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              className="w-full text-xs pl-8 pr-2.5 py-1 rounded-md border border-slate-200 bg-slate-50 focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-500"
+              className="h-9 w-full text-xs pl-8 pr-2.5 rounded-lg border border-slate-300 bg-white text-slate-900 placeholder:text-slate-500 font-normal focus:bg-white focus:outline-none focus:ring-1 focus:ring-sky-600 focus:border-sky-600"
             />
           </div>
 
-          {/* Company filter */}
+          {/* Company filter: h-9 */}
           {uniqueCompanies.length > 0 && (
-            <div className="flex items-center gap-1 text-xs">
-              <Filter className="w-3.5 h-3.5 text-slate-400" />
+            <div className="flex items-center gap-1 text-xs h-9">
+              <Filter className="w-3.5 h-3.5 text-slate-500" />
               <select
                 value={selectedCompanyFilter}
                 onChange={e => setSelectedCompanyFilter(e.target.value)}
-                className="text-xs font-medium text-slate-700 bg-slate-50 border border-slate-200 rounded-md px-2 py-1 outline-none cursor-pointer"
+                className="h-9 text-xs font-normal text-slate-900 bg-white border border-slate-300 rounded-lg px-2.5 outline-none focus:ring-1 focus:ring-sky-600 cursor-pointer"
               >
                 <option value="all">ทุกสังกัด ({entries.length} คน)</option>
                 {uniqueCompanies.map(c => (
@@ -309,19 +309,19 @@ export function LocationBreakdownView({
           )}
         </div>
 
-        {/* Right: Expand buttons & Copy LINE summary */}
-        <div className="flex items-center gap-1.5 ml-auto">
+        {/* Right: Expand buttons & Copy LINE summary (h-9) */}
+        <div className="flex items-center gap-1.5 ml-auto h-9">
           <button
             type="button"
             onClick={() => toggleAllExpand(true)}
-            className="text-[11px] font-semibold text-slate-600 hover:text-slate-900 px-2 py-1 rounded hover:bg-slate-100 transition-colors"
+            className="h-9 text-[11px] font-semibold text-slate-800 hover:text-slate-900 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 transition-colors cursor-pointer"
           >
             กางทั้งหมด
           </button>
           <button
             type="button"
             onClick={() => toggleAllExpand(false)}
-            className="text-[11px] font-semibold text-slate-600 hover:text-slate-900 px-2 py-1 rounded hover:bg-slate-100 transition-colors"
+            className="h-9 text-[11px] font-semibold text-slate-800 hover:text-slate-900 px-2.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 transition-colors cursor-pointer"
           >
             พับทั้งหมด
           </button>
@@ -329,7 +329,7 @@ export function LocationBreakdownView({
           <button
             type="button"
             onClick={handleCopyLineSummary}
-            className="h-7 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded text-[11px] font-bold flex items-center gap-1.5 transition-colors shadow-2xs"
+            className="h-9 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
           >
             {copiedLine ? (
               <>
@@ -339,7 +339,7 @@ export function LocationBreakdownView({
             ) : (
               <>
                 <Copy className="w-3.5 h-3.5" />
-                <span>คัดลอกสรุปส่ง LINE</span>
+                <span>คัดลอกส่ง LINE</span>
               </>
             )}
           </button>
@@ -348,64 +348,64 @@ export function LocationBreakdownView({
             type="button"
             onClick={() => fetchDateEntries(selectedDate)}
             disabled={loading}
-            className="w-7 h-7 flex items-center justify-center rounded border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors disabled:opacity-50"
+            className="h-9 w-9 flex items-center justify-center rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 transition-colors disabled:opacity-50 cursor-pointer"
             title="รีเฟรชข้อมูล"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-sky-600' : ''}`} />
           </button>
         </div>
 
       </div>
 
-      {/* ── KPI Summary Scorecards ── */}
+      {/* ── KPI Summary Scorecards (mini-Compact & High Contrast) ── */}
       <div className={`grid grid-cols-2 sm:grid-cols-3 ${mealConfig?.enabled ? 'lg:grid-cols-5' : 'lg:grid-cols-4'} gap-2 shrink-0`}>
         
         {/* KPI 1: จำนวนจุดปฏิบัติงาน */}
-        <div className="p-2.5 bg-white rounded-lg border border-slate-300 shadow-2xs flex items-center justify-between">
+        <div className="p-2 bg-white rounded-lg border border-slate-300 shadow-2xs flex items-center justify-between">
           <div className="min-w-0">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block truncate">
+            <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide block truncate">
               จุดปฏิบัติงานทั้งหมด
             </span>
             <div className="flex items-baseline gap-1 mt-0.5">
               <span className="text-xl font-bold text-slate-900 leading-none">
                 {summaryKpi.totalSpots}
               </span>
-              <span className="text-[10px] text-slate-400">จุด / พื้นที่</span>
+              <span className="text-[11px] text-slate-700 font-normal">จุด / พื้นที่</span>
             </div>
-            <span className="text-[10px] text-sky-600 font-semibold block mt-0.5 truncate">
+            <span className="text-[11px] text-sky-800 font-semibold block mt-0.5 truncate">
               กระจายกำลังพล
             </span>
           </div>
-          <div className="w-9 h-9 rounded-lg bg-sky-50 text-sky-600 flex items-center justify-center shrink-0 border border-sky-200">
-            <MapPin className="w-5 h-5" />
+          <div className="w-8 h-8 rounded-md bg-sky-100 text-sky-800 flex items-center justify-center shrink-0 border border-sky-300">
+            <MapPin className="w-4 h-4" />
           </div>
         </div>
 
         {/* KPI 2: กำลังพลรวม */}
-        <div className="p-2.5 bg-white rounded-lg border border-slate-300 shadow-2xs flex items-center justify-between">
+        <div className="p-2 bg-white rounded-lg border border-slate-300 shadow-2xs flex items-center justify-between">
           <div className="min-w-0">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block truncate">
+            <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide block truncate">
               กำลังพลในทุกจุดรวม
             </span>
             <div className="flex items-baseline gap-1 mt-0.5">
               <span className="text-xl font-bold text-slate-900 leading-none">
                 {summaryKpi.totalWorkers}
               </span>
-              <span className="text-[10px] text-slate-400">คน</span>
+              <span className="text-[11px] text-slate-700 font-normal">คน</span>
             </div>
-            <span className="text-[10px] text-emerald-600 font-semibold block mt-0.5">
+            <span className="text-[11px] text-emerald-800 font-semibold block mt-0.5">
               อยู่ในโครงการ: {summaryKpi.totalActive} คน
             </span>
           </div>
-          <div className="w-9 h-9 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0 border border-blue-200">
-            <Users className="w-5 h-5" />
+          <div className="w-8 h-8 rounded-md bg-blue-100 text-blue-800 flex items-center justify-center shrink-0 border border-blue-300">
+            <Users className="w-4 h-4" />
           </div>
         </div>
 
         {/* KPI 3: จุดที่มีคนหนาแน่นที่สุด */}
-        <div className="p-2.5 bg-white rounded-lg border border-slate-300 shadow-2xs flex items-center justify-between">
+        <div className="p-2 bg-white rounded-lg border border-slate-300 shadow-2xs flex items-center justify-between">
           <div className="min-w-0">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block truncate">
+            <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide block truncate">
               จุดที่คนหนาแน่นสุด
             </span>
             <div className="mt-0.5 truncate">
@@ -413,74 +413,74 @@ export function LocationBreakdownView({
                 {summaryKpi.topSpot ? summaryKpi.topSpot.locationName : '—'}
               </span>
             </div>
-            <span className="text-[10px] text-slate-500 block mt-0.5">
+            <span className="text-[11px] text-slate-700 font-normal block mt-0.5">
               {summaryKpi.topSpot ? `${summaryKpi.topSpot.totalWorkers} คน (${summaryKpi.topSpot.percentage}%)` : 'ไม่มีข้อมูล'}
             </span>
           </div>
-          <div className="w-9 h-9 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0 border border-indigo-200">
-            <Building2 className="w-5 h-5" />
+          <div className="w-8 h-8 rounded-md bg-indigo-100 text-indigo-800 flex items-center justify-center shrink-0 border border-indigo-300">
+            <Building2 className="w-4 h-4" />
           </div>
         </div>
 
         {/* KPI 4: ยอดสั่งข้าวกล่องรวม (SHOW ONLY IF MEAL ENABLED) */}
         {mealConfig?.enabled && (
-          <div className="p-2.5 bg-amber-50/70 rounded-lg border border-amber-300 shadow-2xs flex items-center justify-between">
+          <div className="p-2 bg-amber-50/80 rounded-lg border border-amber-300 shadow-2xs flex items-center justify-between">
             <div className="min-w-0">
-              <span className="text-[10px] font-bold text-amber-900 uppercase tracking-wider block truncate">
+              <span className="text-[11px] font-semibold text-amber-900 uppercase tracking-wide block truncate">
                 ข้าวกล่องที่ต้องกระจายส่ง
               </span>
               <div className="flex items-baseline gap-1 mt-0.5">
                 <span className="text-xl font-bold text-amber-950 leading-none">
                   {summaryKpi.totalMeals}
                 </span>
-                <span className="text-[10px] text-amber-800">กล่อง</span>
+                <span className="text-[11px] text-amber-900 font-normal">กล่อง</span>
               </div>
-              <span className="text-[10px] text-amber-800 font-semibold block mt-0.5">
+              <span className="text-[11px] text-amber-900 font-semibold block mt-0.5">
                 รวม ฿{(summaryKpi.totalMeals * (mealConfig.price_per_meal || 60)).toLocaleString()} บาท
               </span>
             </div>
-            <div className="w-9 h-9 rounded-lg bg-amber-100 text-amber-700 flex items-center justify-center shrink-0 border border-amber-300">
-              <UtensilsCrossed className="w-5 h-5" />
+            <div className="w-8 h-8 rounded-md bg-amber-200 text-amber-800 flex items-center justify-center shrink-0 border border-amber-300">
+              <UtensilsCrossed className="w-4 h-4" />
             </div>
           </div>
         )}
 
         {/* KPI 5: เคสความเสี่ยงในพื้นที่ */}
-        <div className="p-2.5 bg-white rounded-lg border border-slate-300 shadow-2xs flex items-center justify-between">
+        <div className="p-2 bg-white rounded-lg border border-slate-300 shadow-2xs flex items-center justify-between">
           <div className="min-w-0">
-            <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block truncate">
+            <span className="text-[11px] font-semibold text-slate-700 uppercase tracking-wide block truncate">
               ตรวจพบความเสี่ยง
             </span>
             <div className="flex items-baseline gap-1 mt-0.5">
-              <span className={`text-xl font-bold leading-none ${summaryKpi.totalSafetyIssues > 0 ? 'text-red-600' : 'text-slate-800'}`}>
+              <span className={`text-xl font-bold leading-none ${summaryKpi.totalSafetyIssues > 0 ? 'text-red-700' : 'text-slate-900'}`}>
                 {summaryKpi.totalSafetyIssues}
               </span>
-              <span className="text-[10px] text-slate-400">รายการ</span>
+              <span className="text-[11px] text-slate-700 font-normal">รายการ</span>
             </div>
-            <span className="text-[10px] text-slate-500 block mt-0.5">
+            <span className="text-[11px] text-slate-700 font-normal block mt-0.5">
               ALC / PPE ไม่ผ่าน
             </span>
           </div>
-          <div className={`w-9 h-9 rounded-lg flex items-center justify-center shrink-0 border ${summaryKpi.totalSafetyIssues > 0 ? 'bg-red-50 text-red-600 border-red-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
-            <AlertTriangle className="w-5 h-5" />
+          <div className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 border ${summaryKpi.totalSafetyIssues > 0 ? 'bg-red-100 text-red-700 border-red-300' : 'bg-slate-100 text-slate-600 border-slate-300'}`}>
+            <AlertTriangle className="w-4 h-4" />
           </div>
         </div>
 
       </div>
 
       {/* ── Main Locations List Container ── */}
-      <div className="flex-1 min-h-0 overflow-y-auto space-y-2.5 pr-0.5">
+      <div className="flex-1 min-h-0 overflow-y-auto space-y-2 pr-0.5">
         
         {loading ? (
-          <div className="h-64 bg-white rounded-lg border border-slate-300 flex flex-col items-center justify-center text-slate-500 text-xs gap-2">
+          <div className="h-64 bg-white rounded-lg border border-slate-300 flex flex-col items-center justify-center text-slate-600 text-xs gap-2">
             <RefreshCw className="w-6 h-6 animate-spin text-sky-600" />
-            <span>กำลังประมวลผลข้อมูลรายจุดปฏิบัติงาน...</span>
+            <span className="font-normal">กำลังประมวลผลข้อมูลรายจุดปฏิบัติงาน...</span>
           </div>
         ) : locations.length === 0 ? (
-          <div className="h-64 bg-white rounded-lg border border-slate-300 flex flex-col items-center justify-center text-slate-400 text-xs gap-2 p-6 text-center">
-            <MapPin className="w-10 h-10 text-slate-300" />
-            <p className="font-semibold text-slate-700 text-sm">ไม่พบข้อมูลจุดปฏิบัติงานในวันที่เลือก</p>
-            <p className="text-slate-400 text-[11px] max-w-sm">
+          <div className="h-64 bg-white rounded-lg border border-slate-300 flex flex-col items-center justify-center text-slate-600 text-xs gap-2 p-6 text-center">
+            <MapPin className="w-10 h-10 text-slate-400" />
+            <p className="font-semibold text-slate-800 text-sm">ไม่พบข้อมูลจุดปฏิบัติงานในวันที่เลือก</p>
+            <p className="text-slate-600 text-[11px] max-w-sm font-normal">
               ลองเลือกวันที่อื่น หรือตรวจสอบว่ามีการระบุ &quot;สถานที่&quot; ในการบันทึก Checklist หรือไม่
             </p>
           </div>
@@ -492,40 +492,40 @@ export function LocationBreakdownView({
             return (
               <div
                 key={loc.locationName}
-                className="bg-white rounded-xl border border-slate-300 shadow-2xs overflow-hidden transition-all"
+                className="bg-white rounded-lg border border-slate-300 shadow-2xs overflow-hidden transition-all"
               >
                 {/* Location Header Strip */}
                 <div
                   onClick={() => toggleExpand(loc.locationName)}
-                  className="p-3 bg-slate-50/80 hover:bg-slate-100/80 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3 cursor-pointer transition-colors select-none"
+                  className="p-2.5 bg-slate-50 hover:bg-slate-100 border-b border-slate-300 flex flex-wrap items-center justify-between gap-2.5 cursor-pointer transition-colors select-none"
                 >
                   {/* Left: Location Name & Ranking */}
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <span className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-bold font-mono ${
-                      isTopSpot ? 'bg-sky-600 text-white' : 'bg-slate-200 text-slate-700'
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className={`w-6 h-6 rounded-md flex items-center justify-center text-xs font-semibold ${
+                      isTopSpot ? 'bg-sky-600 text-white' : 'bg-slate-200 text-slate-800'
                     }`}>
                       #{idx + 1}
                     </span>
 
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <span className="font-bold text-sm text-slate-900 truncate">
+                        <span className="font-bold text-xs text-slate-900 truncate">
                           {loc.locationName}
                         </span>
                         {isTopSpot && (
-                          <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-sky-100 text-sky-800 border border-sky-300">
+                          <span className="px-1.5 py-0.2 rounded text-[11px] font-semibold bg-sky-100 text-sky-900 border border-sky-300">
                             หนาแน่นสูงสุด
                           </span>
                         )}
                       </div>
-                      <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-0.5">
+                      <div className="flex items-center gap-2 text-[11px] text-slate-700 mt-0.5 font-normal">
                         <span>{loc.companies.length} สังกัด</span>
                         <span>•</span>
                         <span>{loc.activities.length} ระบบงาน</span>
                         {loc.supervisors.length > 0 && (
                           <>
                             <span>•</span>
-                            <span className="text-slate-600 truncate">
+                            <span className="text-slate-800 truncate">
                               ผู้ควบคุม: {loc.supervisors.join(', ')}
                             </span>
                           </>
@@ -535,30 +535,30 @@ export function LocationBreakdownView({
                   </div>
 
                   {/* Right: Numbers Summary Badges & Toggle */}
-                  <div className="flex items-center gap-3 ml-auto">
+                  <div className="flex items-center gap-2.5 ml-auto">
                     
                     {/* Headcount Badge */}
                     <div className="text-right">
                       <div className="flex items-baseline justify-end gap-1">
-                        <span className="text-base font-bold text-slate-900 font-mono">
+                        <span className="text-sm font-bold text-slate-900">
                           {loc.totalWorkers}
                         </span>
-                        <span className="text-[11px] text-slate-500">คน</span>
+                        <span className="text-[11px] text-slate-700 font-normal">คน</span>
                       </div>
-                      <span className="text-[10px] text-slate-400 font-mono block">
+                      <span className="text-[11px] text-slate-600 font-normal block">
                         ({loc.percentage}% ของไซต์)
                       </span>
                     </div>
 
                     {/* Meal Allowance Badge (If mealConfig.enabled) */}
                     {mealConfig?.enabled && (
-                      <div className="px-2 py-1 rounded-md bg-amber-100 border border-amber-300 text-amber-950 text-right">
-                        <div className="flex items-center gap-1 text-[11px] font-bold">
+                      <div className="px-2 py-0.5 rounded-md bg-amber-100 border border-amber-300 text-amber-950 text-right">
+                        <div className="flex items-center gap-1 text-[11px] font-semibold">
                           <span>🍱</span>
-                          <span className="font-mono">{loc.mealCount}</span>
-                          <span className="font-normal text-[10px]">กล่อง</span>
+                          <span>{loc.mealCount}</span>
+                          <span className="font-normal text-[11px]">กล่อง</span>
                         </div>
-                        <span className="text-[9px] text-amber-800 font-mono block">
+                        <span className="text-[11px] text-amber-900 font-normal block">
                           ฿{loc.totalMealCost.toLocaleString()}
                         </span>
                       </div>
@@ -566,12 +566,12 @@ export function LocationBreakdownView({
 
                     {/* Safety Badge */}
                     {loc.safetyIssuesCount > 0 ? (
-                      <span className="px-2 py-1 rounded bg-red-50 text-red-700 text-[11px] font-bold border border-red-200 flex items-center gap-1">
-                        <AlertTriangle className="w-3.5 h-3.5" />
+                      <span className="px-2 py-0.5 rounded bg-red-100 text-red-900 text-[11px] font-semibold border border-red-300 flex items-center gap-1">
+                        <AlertTriangle className="w-3.5 h-3.5 text-red-700" />
                         <span>เสี่ยง {loc.safetyIssuesCount}</span>
                       </span>
                     ) : (
-                      <span className="hidden sm:inline-flex px-2 py-1 rounded bg-emerald-50 text-emerald-800 text-[10px] font-semibold border border-emerald-200">
+                      <span className="hidden sm:inline-flex px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 text-[11px] font-semibold border border-emerald-300">
                         ✓ ปลอดภัยครบ
                       </span>
                     )}
@@ -579,7 +579,7 @@ export function LocationBreakdownView({
                     {/* Expand Arrow */}
                     <button
                       type="button"
-                      className="w-7 h-7 rounded-lg flex items-center justify-center text-slate-400 hover:text-slate-700 hover:bg-slate-200/60 transition-colors"
+                      className="w-7 h-7 rounded-md flex items-center justify-center text-slate-600 hover:text-slate-900 hover:bg-slate-200 transition-colors"
                       title={isExpanded ? 'พับเก็บ' : 'ขยายดูรายชื่อ'}
                     >
                       {isExpanded ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
@@ -588,37 +588,37 @@ export function LocationBreakdownView({
                 </div>
 
                 {/* Location Quick Sub-Stats Strip: Progress bar + Company pills */}
-                <div className="p-3 space-y-2.5">
+                <div className="p-2.5 space-y-2">
                   
                   {/* Visual Proportion Bar */}
                   <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px] text-slate-500">
+                    <div className="flex items-center justify-between text-[11px] text-slate-700 font-normal">
                       <span>สัดส่วนกำลังพล ณ จุดนี้</span>
-                      <span className="font-mono font-bold text-slate-700">
+                      <span className="font-semibold text-slate-900">
                         {loc.totalWorkers} / {summaryKpi.totalWorkers} คน ({loc.percentage}%)
                       </span>
                     </div>
-                    <div className="w-full bg-slate-100 rounded-full h-2 overflow-hidden">
+                    <div className="w-full bg-slate-200 rounded-full h-1.5 overflow-hidden">
                       <div
-                        className="h-full rounded-full bg-sky-500 transition-all duration-500"
+                        className="h-full rounded-full bg-sky-600 transition-all duration-500"
                         style={{ width: `${Math.max(loc.percentage, 3)}%` }}
                       />
                     </div>
                   </div>
 
                   {/* Companies Breakdown Pills */}
-                  <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                    <span className="text-[11px] font-semibold text-slate-500 flex items-center gap-1 mr-1">
-                      <Building2 className="w-3 h-3 text-slate-400" />
+                  <div className="flex flex-wrap items-center gap-1.5 pt-0.5">
+                    <span className="text-[11px] font-semibold text-slate-800 flex items-center gap-1 mr-1">
+                      <Building2 className="w-3 h-3 text-slate-600" />
                       <span>ทีมงานในจุดนี้:</span>
                     </span>
                     {loc.companies.map(c => (
                       <span
                         key={c.name}
-                        className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-700 text-[11px] font-medium inline-flex items-center gap-1"
+                        className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-300 text-slate-800 text-[11px] font-normal inline-flex items-center gap-1"
                       >
                         <span>{c.name}</span>
-                        <strong className="text-slate-900 font-mono font-bold bg-white px-1 rounded border border-slate-200 text-[10px]">
+                        <strong className="text-slate-900 font-semibold bg-white px-1 rounded border border-slate-300 text-[11px]">
                           {c.count} คน
                         </strong>
                       </span>
@@ -627,48 +627,48 @@ export function LocationBreakdownView({
 
                   {/* Activities Breakdown Pills */}
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-[11px] font-semibold text-slate-500 flex items-center gap-1 mr-1">
-                      <HardHat className="w-3 h-3 text-slate-400" />
+                    <span className="text-[11px] font-semibold text-slate-800 flex items-center gap-1 mr-1">
+                      <HardHat className="w-3 h-3 text-slate-600" />
                       <span>งานที่ปฏิบัติ:</span>
                     </span>
                     {loc.activities.map(a => (
                       <span
                         key={a.name}
-                        className="px-2 py-0.5 rounded-md bg-purple-50 border border-purple-200 text-purple-900 text-[11px] font-medium"
+                        className="px-2 py-0.5 rounded-md bg-purple-50 border border-purple-200 text-purple-950 text-[11px] font-normal"
                       >
-                        {a.name} <span className="font-mono text-purple-700 font-bold">({a.count})</span>
+                        {a.name} <span className="text-purple-800 font-semibold">({a.count})</span>
                       </span>
                     ))}
                   </div>
                 </div>
 
-                {/* ── Collapsible Worker Table for this Location ── */}
+                {/* ── Collapsible Worker Table for this Location (ตารางกระชับ mini-Compact) ── */}
                 {isExpanded && (
-                  <div className="border-t border-slate-200 bg-slate-50/50 p-3 space-y-2 animate-in fade-in duration-200">
-                    <div className="flex items-center justify-between text-xs font-bold text-slate-800">
+                  <div className="border-t border-slate-300 bg-slate-50/60 p-2.5 space-y-1.5 animate-in fade-in duration-200">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-900">
                       <span>รายชื่อช่างและผลการคัดกรอง ณ {loc.locationName} ({loc.workers.length} คน)</span>
-                      <span className="text-[11px] text-slate-400 font-normal">
+                      <span className="text-[11px] text-slate-700 font-normal">
                         ตรวจผ่าน ALC และ PPE ครบ
                       </span>
                     </div>
 
-                    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                    <div className="overflow-x-auto rounded-lg border border-slate-300 bg-white">
                       <table className="w-full text-left border-collapse text-xs">
-                        <thead className="bg-slate-100 text-slate-700 text-[11px] border-b border-slate-200">
+                        <thead className="bg-slate-100 text-slate-800 text-[11px] border-b border-slate-300">
                           <tr>
-                            <th className="py-1.5 px-2 w-10 text-center font-bold border-r border-slate-200">#</th>
-                            <th className="py-1.5 px-2.5 font-bold border-r border-slate-200">ชื่อ - สกุล</th>
-                            <th className="py-1.5 px-2 font-bold border-r border-slate-200">สังกัด</th>
-                            <th className="py-1.5 px-2 font-bold border-r border-slate-200">งาน</th>
-                            <th className="py-1.5 px-2 text-center font-bold border-r border-slate-200">เวลาเข้า</th>
-                            <th className="py-1.5 px-1.5 text-center font-bold border-r border-slate-200">ALC</th>
-                            <th className="py-1.5 px-2 text-center font-bold border-r border-slate-200">PPE</th>
+                            <th className="py-1.5 px-2 w-10 text-center font-semibold border-r border-slate-300">#</th>
+                            <th className="py-1.5 px-2.5 font-semibold border-r border-slate-300">ชื่อ - สกุล</th>
+                            <th className="py-1.5 px-2 font-semibold border-r border-slate-300">สังกัด</th>
+                            <th className="py-1.5 px-2 font-semibold border-r border-slate-300">งาน</th>
+                            <th className="py-1.5 px-2 text-center font-semibold border-r border-slate-300">เวลาเข้า</th>
+                            <th className="py-1.5 px-1.5 text-center font-semibold border-r border-slate-300">ALC</th>
+                            <th className="py-1.5 px-2 text-center font-semibold border-r border-slate-300">PPE</th>
                             {mealConfig?.enabled && (
-                              <th className="py-1.5 px-2 text-center font-bold border-r border-slate-200 bg-amber-50">
+                              <th className="py-1.5 px-2 text-center font-semibold border-r border-slate-300 bg-amber-50">
                                 🍱 ข้าว
                               </th>
                             )}
-                            <th className="py-1.5 px-2 text-center font-bold">สถานะ</th>
+                            <th className="py-1.5 px-2 text-center font-semibold">สถานะ</th>
                           </tr>
                         </thead>
                         <tbody>
@@ -681,62 +681,62 @@ export function LocationBreakdownView({
                               w.ppe_shoes,
                             ].filter(Boolean).length
 
-                            const isSafe = ppeCount === 5 && isAlcoholPassed(w.alc_result)
-
                             return (
                               <tr
                                 key={w.id}
-                                className={`border-b border-slate-100 hover:bg-slate-50 transition-colors ${
+                                className={`border-b border-slate-200 hover:bg-slate-50 transition-colors ${
                                   w.is_blacklisted ? 'bg-red-50/60' : ''
                                 }`}
                               >
-                                <td className="py-1.5 px-2 text-center text-slate-400 font-mono text-[11px] border-r border-slate-100">
+                                <td className="py-1.5 px-2 text-center text-slate-700 text-[11px] font-normal border-r border-slate-200">
                                   {wIdx + 1}
                                 </td>
-                                <td className="py-1.5 px-2.5 font-semibold text-slate-900 border-r border-slate-100 truncate">
+                                <td className="py-1.5 px-2.5 font-normal text-slate-900 border-r border-slate-200 truncate">
                                   {w.contractor_name}
                                 </td>
-                                <td className="py-1.5 px-2 text-slate-600 text-[11px] border-r border-slate-100 truncate">
+                                <td className="py-1.5 px-2 text-slate-800 text-[11px] font-normal border-r border-slate-200 truncate">
                                   {w.company_name || '—'}
                                 </td>
-                                <td className="py-1.5 px-2 text-slate-600 text-[11px] border-r border-slate-100 truncate">
+                                <td className="py-1.5 px-2 text-slate-800 text-[11px] font-normal border-r border-slate-200 truncate">
                                   {w.activity_name || 'งานทั่วไป'}
                                 </td>
-                                <td className="py-1.5 px-2 text-center font-mono text-[11px] text-emerald-700 font-bold border-r border-slate-100">
+                                <td className="py-1.5 px-2 text-center text-[11px] text-emerald-800 font-semibold border-r border-slate-200">
                                   {w.check_in_time || '—'}
                                 </td>
-                                <td className="py-1.5 px-1.5 text-center border-r border-slate-100">
-                                  <span className={`px-1 py-0.2 rounded text-[10px] font-bold ${
+                                <td className="py-1.5 px-1.5 text-center border-r border-slate-200">
+                                  <span className={`px-1.5 py-0.2 rounded text-[11px] font-semibold border ${
                                     isAlcoholFailed(w.alc_result)
-                                      ? 'bg-red-100 text-red-700'
-                                      : 'bg-emerald-50 text-emerald-700'
+                                      ? 'bg-red-100 text-red-900 border-red-300'
+                                      : 'bg-emerald-100 text-emerald-900 border-emerald-300'
                                   }`}>
                                     {w.alc_result || '0%'}
                                   </span>
                                 </td>
-                                <td className="py-1.5 px-2 text-center border-r border-slate-100">
-                                  <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono font-bold ${
-                                    ppeCount === 5 ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-100 text-amber-800'
+                                <td className="py-1.5 px-2 text-center border-r border-slate-200">
+                                  <span className={`px-1.5 py-0.2 rounded text-[11px] font-semibold border ${
+                                    ppeCount === 5
+                                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                      : 'bg-amber-100 text-amber-900 border-amber-300'
                                   }`}>
                                     {ppeCount}/5
                                   </span>
                                 </td>
                                 {mealConfig?.enabled && (
-                                  <td className="py-1.5 px-2 text-center border-r border-slate-100 bg-amber-50/30">
+                                  <td className="py-1.5 px-2 text-center border-r border-slate-200 bg-amber-50/40">
                                     {w.meal_allowance ? (
-                                      <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-amber-200 text-amber-900">
+                                      <span className="px-1.5 py-0.2 rounded text-[11px] font-semibold bg-amber-200 text-amber-950 border border-amber-300">
                                         ✓ รับข้าว
                                       </span>
                                     ) : (
-                                      <span className="text-[10px] text-slate-300">—</span>
+                                      <span className="text-[11px] text-slate-400 font-normal">—</span>
                                     )}
                                   </td>
                                 )}
                                 <td className="py-1.5 px-2 text-center">
-                                  <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                  <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold border ${
                                     w.status === 'active'
-                                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                                      : 'bg-slate-100 text-slate-600'
+                                      ? 'bg-emerald-100 text-emerald-900 border-emerald-300'
+                                      : 'bg-slate-100 text-slate-800 border-slate-300'
                                   }`}>
                                     {w.status === 'active' ? 'อยู่ในพื้นที่' : 'ออกงานแล้ว'}
                                   </span>
