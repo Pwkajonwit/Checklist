@@ -76,7 +76,13 @@ export async function runDailyCronNotification(options: CronRunOptions = {}) {
     executed: true,
     success: dispatchResult.success,
     date: todayStr,
-    time: format(now, 'HH:mm:ss น.'),
+    time: new Intl.DateTimeFormat('en-GB', {
+      timeZone: 'Asia/Bangkok',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    }).format(now) + ' น.',
     slot: options.slot || null,
     reportStats: {
       totalRegistered: report.totalRegistered,

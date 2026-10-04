@@ -379,11 +379,19 @@ export default function LineOAPage() {
 
     setTestingConnection(true)
     try {
+      const bkkTime = new Intl.DateTimeFormat('en-GB', {
+        timeZone: 'Asia/Bangkok',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false,
+      }).format(new Date()) + ' น.'
+
       const res = await fetch('/api/line/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: `🔔 [ทดสอบการเชื่อมต่อ SiteCheck PRO]\nระบบสามารถส่งข้อความแจ้งเตือนได้อย่างสมบูรณ์แล้ว ✅\nเวลา: ${format(new Date(), 'HH:mm:ss น.')}`,
+          message: `🔔 [ทดสอบการเชื่อมต่อ SiteCheck PRO]\nระบบสามารถส่งข้อความแจ้งเตือนได้อย่างสมบูรณ์แล้ว ✅\nเวลา: ${bkkTime}`,
           line_enabled: config.line_enabled,
           line_channel_access_token: config.line_channel_access_token,
           line_target_id: config.line_target_id,

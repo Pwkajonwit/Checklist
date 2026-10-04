@@ -295,7 +295,7 @@ export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
   telegram_bot_token: '',
   telegram_chat_id: '',
   schedule_enabled: true,
-  schedule_times: ['09:00', '12:00', '17:00'],
+  schedule_times: ['08:50', '10:30'],
   schedule_mode: 'flex',
   cron_secret: 'sitecheck-cron-secret',
 }

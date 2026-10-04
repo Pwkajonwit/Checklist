@@ -527,7 +527,12 @@ export function formatDailyLineMessage(report: DailyReportData): string {
     lines.push(`────────────────`)
   }
 
-  lines.push(`🕒 รายงานเมื่อ: ${format(new Date(), 'HH:mm น.')}`)
+  const now = new Date()
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000
+  const bkk = new Date(utcMs + 7 * 3600000)
+  const bangkokTime = `${String(bkk.getHours()).padStart(2, '0')}:${String(bkk.getMinutes()).padStart(2, '0')} น.`
+
+  lines.push(`🕒 รายงานเมื่อ: ${bangkokTime}`)
   lines.push(`🛡️ ระบบ SiteCheck PRO`)
 
   return lines.join('\n')
@@ -544,7 +549,10 @@ export function buildDailyLineFlexMessage(report: DailyReportData): any {
     dText = format(new Date(report.date), 'd MMM yyyy', { locale: th })
   } catch {}
 
-  const currentTime = format(new Date(), 'HH:mm น.')
+  const now = new Date()
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000
+  const bkk = new Date(utcMs + 7 * 3600000)
+  const currentTime = `${String(bkk.getHours()).padStart(2, '0')}:${String(bkk.getMinutes()).padStart(2, '0')} น.`
   const totalRequests = report.companies.reduce((sum, c) => sum + c.lateOrRequests.length, 0)
 
   // ══════════════════════════════════════════════════════════════════════════
