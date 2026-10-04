@@ -44,14 +44,17 @@ function formatThaiDateShort(dateStr: string): string {
   }
 }
 
+function getBangkokNow(): Date {
+  const now = new Date();
+  const utcMs = now.getTime() + now.getTimezoneOffset() * 60000;
+  return new Date(utcMs + 7 * 3600000);
+}
+
 function getThaiTime(): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Asia/Bangkok",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).format(new Date());
-  return `${parts} น.`;
+  const bkk = getBangkokNow();
+  const h = String(bkk.getHours()).padStart(2, "0");
+  const m = String(bkk.getMinutes()).padStart(2, "0");
+  return `${h}:${m} น.`;
 }
 
 function cleanCompanyCode(code?: string | null): string | null {
@@ -1309,12 +1312,8 @@ Deno.serve(async (req: Request) => {
         );
       }
 
-      const currentBangkokTime = new Intl.DateTimeFormat("en-GB", {
-        timeZone: "Asia/Bangkok",
-        hour: "2-digit",
-        minute: "2-digit",
-        hour12: false,
-      }).format(new Date());
+      const bkkCheck = getBangkokNow();
+      const currentBangkokTime = `${String(bkkCheck.getHours()).padStart(2, "0")}:${String(bkkCheck.getMinutes()).padStart(2, "0")}`;
 
       const scheduleTimes: string[] = Array.isArray(config.schedule_times)
         ? config.schedule_times
@@ -1333,12 +1332,11 @@ Deno.serve(async (req: Request) => {
     }
 
     // 2. Fetch today's records (Asia/Bangkok)
-    const todayStr = new Intl.DateTimeFormat("en-CA", {
-      timeZone: "Asia/Bangkok",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    }).format(new Date());
+    const bkkToday = getBangkokNow();
+    const y = bkkToday.getFullYear();
+    const m = String(bkkToday.getMonth() + 1).padStart(2, "0");
+    const d = String(bkkToday.getDate()).padStart(2, "0");
+    const todayStr = `${y}-${m}-${d}`;
 
     const [{ data: entries }, { data: contractors }, { data: companies }, { data: activities }] =
       await Promise.all([

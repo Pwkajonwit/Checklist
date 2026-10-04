@@ -52,10 +52,10 @@ SELECT cron.schedule(
     -- หากเวลาปัจจุบันตรงกับเวลาที่ตั้งไว้ในหน้าเว็บ ให้ยิงส่งรายงานทันที
     IF v_times IS NOT NULL AND jsonb_typeof(v_times) = 'array' AND v_times ? v_current_time THEN
       PERFORM net.http_post(
-        url := 'https://kvtmraohblmvcbnkibfc.supabase.co/functions/v1/line-daily-report',
+        url := 'https://oqxttfdafmoytkcgiyuu.supabase.co/functions/v1/line-daily-report',
         headers := jsonb_build_object(
           'Content-Type', 'application/json',
-          'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2dG1yYW9oYmxtdmNibmtpYmZjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDE2NDIyNywiZXhwIjoyMTA1NzQwMjI3fQ.7PR2qgjtPX1s3BxF30tzqKBMuBpgVRCO0L45t13A0s0'
+          'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xeHR0ZmRhZm1veXRrY2dpeXV1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDMzMjM5NSwiZXhwIjoyMTA1OTA4Mzk1fQ.dFiZ83tv9y4kCV-oEvxeABWzv4sTYEeyFUhTZQ4yuE0'
         ),
         body := jsonb_build_object('force', true, 'slot', v_current_time)
       );
@@ -70,10 +70,10 @@ SELECT cron.schedule(
 -- ==============================================================================
 /*
 SELECT net.http_post(
-  url := 'https://kvtmraohblmvcbnkibfc.supabase.co/functions/v1/line-daily-report',
+  url := 'https://oqxttfdafmoytkcgiyuu.supabase.co/functions/v1/line-daily-report',
   headers := jsonb_build_object(
     'Content-Type', 'application/json',
-    'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imt2dG1yYW9oYmxtdmNibmtpYmZjIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDE2NDIyNywiZXhwIjoyMTA1NzQwMjI3fQ.7PR2qgjtPX1s3BxF30tzqKBMuBpgVRCO0L45t13A0s0'
+    'Authorization', 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9xeHR0ZmRhZm1veXRrY2dpeXV1Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc5MDMzMjM5NSwiZXhwIjoyMTA1OTA4Mzk1fQ.dFiZ83tv9y4kCV-oEvxeABWzv4sTYEeyFUhTZQ4yuE0'
   ),
   body := jsonb_build_object('force', true, 'slot', 'manual-test')
 );
