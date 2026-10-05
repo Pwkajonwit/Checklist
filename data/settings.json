@@ -53,8 +53,7 @@
     "schedule_enabled": true,
     "schedule_times": [
       "08:50",
-      "10:30",
-      "11:00"
+      "10:30"
     ],
     "schedule_mode": "flex",
     "cron_secret": "sitecheck-cron-secret"
