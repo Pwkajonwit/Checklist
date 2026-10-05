@@ -1673,7 +1673,7 @@ export default function LineOAPage() {
                   </div>
                 </div>
 
-                {/* Server-Side Scheduler Status & Diagnostics Card */}
+                {/* Vercel Cron Status & Diagnostics Card */}
                 <div className="p-3 rounded-lg border border-blue-200 bg-gradient-to-br from-blue-50/70 to-indigo-50/50 space-y-2">
                   <div className="flex items-center justify-between">
                     <div className="flex items-center gap-2">
@@ -1681,7 +1681,7 @@ export default function LineOAPage() {
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                       </span>
-                      <span className="text-xs font-bold text-blue-950">สถานะเซิร์ฟเวอร์ระบบส่งอัตโนมัติ (Server Scheduler)</span>
+                      <span className="text-xs font-bold text-blue-950">สถานะระบบส่งอัตโนมัติ (Vercel Cron)</span>
                     </div>
                     <span className="text-[10px] px-1.5 py-0.5 rounded bg-blue-100 text-blue-800 font-mono font-bold">
                       เวลาเซิร์ฟเวอร์: {serverSchedulerInfo?.serverBangkokTime || currentTimeStr} น.
@@ -1699,7 +1699,7 @@ export default function LineOAPage() {
                       <span className="text-[10px] text-slate-500 block">สถานะการทำงาน</span>
                       <span className="text-emerald-700 font-bold text-xs flex items-center gap-1">
                         <CheckCircle className="w-3.5 h-3.5" />
-                        <span>ทำงานตลอด 24 ชม.</span>
+                        <span>Vercel Cron พร้อมทำงาน</span>
                       </span>
                     </div>
                   </div>
@@ -1714,7 +1714,7 @@ export default function LineOAPage() {
                   )}
 
                   <div className="text-[10px] text-slate-500 leading-relaxed">
-                    💡 ระบบทำงานเบื้องหลังบนเซิร์ฟเวอร์โดยตรง ไม่จำเป็นต้องเปิดหน้าจอนี้ค้างไว้ เมื่อถึงเวลาที่กำหนด ระบบจะดึงข้อมูลสรุปแล้วส่งเข้า LINE OA / Telegram ทันที
+                    💡 ระบบทำงานผ่าน Vercel Cron โดยตรง ไม่จำเป็นต้องเปิดหน้าจอนี้ค้างไว้ เมื่อถึงเวลาที่กำหนด (08:50, 10:30, 14:30) Vercel จะสั่งยิงข้อความเข้า LINE OA / Telegram อัตโนมัติ 100%
                   </div>
                 </div>
 

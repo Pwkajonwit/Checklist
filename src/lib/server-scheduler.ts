@@ -57,6 +57,15 @@ export async function checkAndTriggerSchedule(): Promise<{
   reason?: string
   result?: any
 }> {
+  return { triggered: false, reason: 'Disabled: Using Vercel Cron exclusively' }
+}
+
+async function _legacyCheckAndTriggerSchedule(): Promise<{
+  triggered: boolean
+  slot?: string
+  reason?: string
+  result?: any
+}> {
   const { dateStr, timeStr, fullStr } = getBangkokDateTime()
 
   // Reset sent slots on new day
@@ -122,26 +131,15 @@ export async function checkAndTriggerSchedule(): Promise<{
 }
 
 /**
- * Start Server Background Scheduler (runs every 20 seconds)
+ * Server Background Scheduler is disabled.
+ * The system now relies exclusively on Vercel Cron.
  */
 export function startServerScheduler() {
-  if (g.__schedulerStarted) {
-    return
-  }
-
-  g.__schedulerStarted = true
-  g.__startedAt = new Date().toISOString()
-  console.log('[SiteCheck Scheduler] 🕒 Background server scheduler initialized (checking every 20s in Asia/Bangkok time)')
-
   if (g.__lineCronTimer) {
     clearInterval(g.__lineCronTimer)
+    g.__lineCronTimer = undefined
   }
-
-  g.__lineCronTimer = setInterval(() => {
-    checkAndTriggerSchedule().catch(err => {
-      console.error('[SiteCheck Scheduler] Tick error:', err)
-    })
-  }, 20_000)
+  g.__schedulerStarted = false
 }
 
 /**
