@@ -1573,7 +1573,7 @@ export function buildMealLineFlexMessage(
                 type: 'box',
                 layout: 'horizontal',
                 justifyContent: 'space-between',
-                alignItems: 'baseline',
+                alignItems: 'center',
                 contents: [
                   {
                     type: 'box',
