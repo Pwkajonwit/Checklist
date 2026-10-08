@@ -449,6 +449,20 @@ export interface NotificationConfig {
   cron_secret: string
 }
 
+export interface NotificationLogEntry {
+  id: string
+  timestamp: string
+  formatted_time: string
+  channel: 'line' | 'telegram' | 'all'
+  title: string
+  target: string
+  success: boolean
+  status_code?: number
+  message?: string
+  error?: string
+  details?: any
+}
+
 export const DEFAULT_NOTIFICATION_CONFIG: NotificationConfig = {
   line_enabled: true,
   line_channel_access_token: '',

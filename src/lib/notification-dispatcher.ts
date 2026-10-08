@@ -1,6 +1,7 @@
-import { getNotificationConfig } from '@/lib/settings-store'
+import { getNotificationConfig, addNotificationLog } from '@/lib/settings-store'
 
 export interface DispatchNotificationParams {
+  title?: string
   message?: string
   flex?: any
   line_enabled?: boolean
@@ -45,6 +46,7 @@ export async function sendNotification(params: DispatchNotificationParams): Prom
     params.line_target_id !== undefined
       ? params.line_target_id
       : savedConfig?.line_target_id || process.env.LINE_TARGET_ID || ''
+  const cleanTargetId = (targetId || '').trim()
   const broadcast =
     params.line_broadcast ?? savedConfig?.line_broadcast ?? false
 
@@ -99,7 +101,6 @@ export async function sendNotification(params: DispatchNotificationParams): Prom
         ? [flex]
         : [{ type: 'text', text: message }]
 
-      const cleanTargetId = (targetId || '').trim()
       const isLikelyValidId = /^[UCR][0-9a-zA-Z]{32}$/.test(cleanTargetId)
 
       if (broadcast || !cleanTargetId) {
@@ -181,6 +182,25 @@ export async function sendNotification(params: DispatchNotificationParams): Prom
     } else if (results.telegram && !results.telegram.ok) {
       errMsg = `Telegram: ${results.telegram.data?.description || results.telegram.error || 'ส่งไม่สำเร็จ'}`
     }
+
+    const logTitle = params.title || (params.flex ? 'รายงานสรุปผล (Flex Carousel)' : 'ส่งข้อความแจ้งเตือน')
+    const targetLabel = broadcast
+      ? 'Broadcast (ทุกคน)'
+      : cleanTargetId
+        ? `ID: ${cleanTargetId.substring(0, 6)}...${cleanTargetId.substring(cleanTargetId.length - 4)}`
+        : 'ไม่ได้ระบุปลายทาง'
+
+    await addNotificationLog({
+      channel: (results.lineOA && results.telegram) ? 'all' : (results.lineOA ? 'line' : 'telegram'),
+      title: logTitle,
+      target: targetLabel,
+      success: false,
+      status_code: results.lineOA?.status || results.telegram?.status || 400,
+      message: errMsg,
+      error: errMsg,
+      details: results,
+    }).catch(err => console.warn('addNotificationLog error:', err))
+
     return {
       success: false,
       message: errMsg,
@@ -193,9 +213,27 @@ export async function sendNotification(params: DispatchNotificationParams): Prom
   if (results.lineOA?.ok) channelNames.push('LINE OA')
   if (results.telegram?.ok) channelNames.push('Telegram')
 
+  const successMsg = `ส่งการแจ้งเตือนไปยัง ${channelNames.join(' และ ')} เรียบร้อยแล้ว`
+  const logTitle = params.title || (params.flex ? 'รายงานสรุปผล (Flex Carousel)' : 'ส่งข้อความแจ้งเตือน')
+  const targetLabel = broadcast
+    ? 'Broadcast (ทุกคน)'
+    : cleanTargetId
+      ? `ID: ${cleanTargetId.substring(0, 6)}...${cleanTargetId.substring(cleanTargetId.length - 4)}`
+      : 'ไม่ได้ระบุปลายทาง'
+
+  await addNotificationLog({
+    channel: (results.lineOA?.ok && results.telegram?.ok) ? 'all' : (results.lineOA?.ok ? 'line' : 'telegram'),
+    title: logTitle,
+    target: targetLabel,
+    success: true,
+    status_code: results.lineOA?.status || results.telegram?.status || 200,
+    message: successMsg,
+    details: results,
+  }).catch(err => console.warn('addNotificationLog error:', err))
+
   return {
     success: true,
-    message: `ส่งการแจ้งเตือนไปยัง ${channelNames.join(' และ ')} เรียบร้อยแล้ว`,
+    message: successMsg,
     results,
   }
 }

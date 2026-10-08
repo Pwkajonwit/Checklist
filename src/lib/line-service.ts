@@ -1083,7 +1083,7 @@ export function buildDailyLineFlexMessage(report: DailyReportData, slotOrTime?: 
             size: 'xxs',
             color: '#f1f5f9',
             wrap: true,
-            margin: 'xxs',
+            margin: 'xs',
           },
         ],
       },
@@ -1265,7 +1265,7 @@ export function buildDailyLineFlexMessage(report: DailyReportData, slotOrTime?: 
               size: 'xxs',
               color: '#f1f5f9',
               wrap: true,
-              margin: 'xxs',
+              margin: 'xs',
             },
           ],
         },
@@ -1573,7 +1573,7 @@ export function buildMealLineFlexMessage(
                 type: 'box',
                 layout: 'horizontal',
                 justifyContent: 'space-between',
-                alignItems: 'baseline',
+                alignItems: 'center',
                 contents: [
                   {
                     type: 'box',

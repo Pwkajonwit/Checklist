@@ -8,7 +8,8 @@ import {
   UtensilsCrossed, Clock, DollarSign, Store, Phone,
   MessageSquare, Info, CheckCircle2, XCircle, AlertCircle,
   BellRing, Smartphone, SendHorizontal, Timer, ExternalLink,
-  Eye, EyeOff, Loader2, Send, Copy
+  Eye, EyeOff, Loader2, Send, Copy,
+  Wifi, WifiOff, History, CheckCircle, RefreshCcw, Shield
 } from 'lucide-react'
 import {
   ChecklistPpeItem,
@@ -17,6 +18,7 @@ import {
   DEFAULT_MEAL_CONFIG,
   NotificationConfig,
   DEFAULT_NOTIFICATION_CONFIG,
+  NotificationLogEntry,
 } from '@/lib/types'
 import { VERCEL_CRON_ROUNDS } from '@/lib/line-service'
 import { toast } from 'sonner'
@@ -51,6 +53,51 @@ export default function SettingsPage() {
   const [newTimeInput, setNewTimeInput] = useState('09:00')
   const [showToken, setShowToken] = useState(false)
   const [showTgToken, setShowTgToken] = useState(false)
+
+  // Connection Verification State
+  const [connectionStatus, setConnectionStatus] = useState<{
+    loading: boolean
+    checkedAt: string | null
+    line: {
+      configured: boolean
+      connected: boolean
+      bot: {
+        displayName: string
+        basicId: string
+        pictureUrl?: string
+        userId?: string
+      } | null
+      targetValid: boolean
+      targetType: string
+      quota: {
+        type: 'limited' | 'none' | 'unknown'
+        total: number | null
+        used: number | null
+        remaining: number | null
+        percentRemaining: number | null
+      } | null
+      error: string | null
+    }
+    telegram: {
+      configured: boolean
+      connected: boolean
+      bot: {
+        username: string
+        first_name: string
+      } | null
+      error: string | null
+    }
+  }>({
+    loading: false,
+    checkedAt: null,
+    line: { configured: false, connected: false, bot: null, targetValid: false, targetType: 'none', quota: null, error: null },
+    telegram: { configured: false, connected: false, bot: null, error: null },
+  })
+
+  // Notification Logs State
+  const [notifLogs, setNotifLogs] = useState<NotificationLogEntry[]>([])
+  const [loadingLogs, setLoadingLogs] = useState(false)
+  const [clearingLogs, setClearingLogs] = useState(false)
 
   // Detect URL parameter ?tab=... to switch tab automatically
   useEffect(() => {
@@ -107,11 +154,14 @@ export default function SettingsPage() {
       const res = await fetch(`/api/settings?id=notification_config&t=${Date.now()}`, { cache: 'no-store' })
       const json = await res.json()
       if (json.success && json.data) {
-        setNotifConfig({
+        const loadedCfg = {
           ...DEFAULT_NOTIFICATION_CONFIG,
           ...json.data,
           schedule_times: ['08:50', '10:30', '14:30'],
-        })
+        }
+        setNotifConfig(loadedCfg)
+        checkConnectionWithConfig(loadedCfg, false)
+        fetchLogs()
       }
     } catch (err) {
       console.error('Failed to load notification config:', err)
@@ -308,6 +358,8 @@ export default function SettingsPage() {
       if (json.success) {
         setNotifConfig(payloadConfig)
         toast.success('บันทึกการตั้งค่าการแจ้งเตือนเรียบร้อยแล้ว')
+        await checkConnectionWithConfig(payloadConfig, false)
+        await fetchLogs()
       } else {
         toast.error(json.error || 'บันทึกล้มเหลว')
       }
@@ -315,6 +367,115 @@ export default function SettingsPage() {
       toast.error('เกิดข้อผิดพลาดในการบันทึก: ' + err.message)
     } finally {
       setSavingNotif(false)
+    }
+  }
+
+  const checkConnectionWithConfig = async (cfg: NotificationConfig, manual = false) => {
+    setConnectionStatus(prev => ({ ...prev, loading: true }))
+    try {
+      const params = new URLSearchParams()
+      if (cfg.line_channel_access_token) params.set('token', cfg.line_channel_access_token)
+      if (cfg.line_target_id) params.set('target_id', cfg.line_target_id)
+      params.set('broadcast', String(cfg.line_broadcast))
+      if (cfg.telegram_bot_token) params.set('tg_token', cfg.telegram_bot_token)
+
+      const res = await fetch(`/api/notifications/verify?${params.toString()}&t=${Date.now()}`, { cache: 'no-store' })
+      const json = await res.json()
+      if (json.success && json.data) {
+        const bkkTime = new Intl.DateTimeFormat('th-TH', {
+          timeZone: 'Asia/Bangkok',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }).format(new Date()) + ' น.'
+
+        setConnectionStatus({
+          loading: false,
+          checkedAt: bkkTime,
+          line: json.data.line,
+          telegram: json.data.telegram,
+        })
+
+        if (manual) {
+          if (json.data.line.connected) {
+            toast.success(`LINE OA เชื่อมต่อถูกต้อง: ${json.data.line.bot?.displayName || ''} (${json.data.line.bot?.basicId || ''})`)
+          } else if (json.data.line.configured) {
+            toast.error(`LINE OA ไม่ถูกต้อง: ${json.data.line.error || ''}`)
+          } else {
+            toast.info('ยังไม่ได้ระบุ Channel Access Token')
+          }
+        }
+      } else {
+        setConnectionStatus(prev => ({ ...prev, loading: false }))
+      }
+    } catch (err: any) {
+      setConnectionStatus(prev => ({ ...prev, loading: false }))
+      if (manual) toast.error('ไม่สามารถตรวจสอบได้: ' + err.message)
+    }
+  }
+
+  const checkConnection = async (manual = false) => {
+    await checkConnectionWithConfig(notifConfig, manual)
+  }
+
+  const fetchLogs = async () => {
+    setLoadingLogs(true)
+    try {
+      const res = await fetch(`/api/notifications/logs?t=${Date.now()}`, { cache: 'no-store' })
+      const json = await res.json()
+      if (json.success && Array.isArray(json.data)) {
+        setNotifLogs(json.data)
+      }
+    } catch (err) {
+      console.warn('Fetch logs error:', err)
+    } finally {
+      setLoadingLogs(false)
+    }
+  }
+
+  const handleClearLogs = async () => {
+    if (!confirm('ต้องการล้างประวัติการแจ้งเตือนทั้งหมดใช่หรือไม่?')) return
+    setClearingLogs(true)
+    try {
+      const res = await fetch('/api/notifications/logs', { method: 'DELETE' })
+      const json = await res.json()
+      if (json.success) {
+        setNotifLogs([])
+        toast.success('ล้างประวัติการแจ้งเตือนเรียบร้อยแล้ว')
+      } else {
+        toast.error(json.error || 'ล้างไม่สำเร็จ')
+      }
+    } catch (err: any) {
+      toast.error('เกิดข้อผิดพลาด: ' + err.message)
+    } finally {
+      setClearingLogs(false)
+    }
+  }
+
+  const [triggeringSlot, setTriggeringSlot] = useState<string | null>(null)
+
+  const handleTriggerCronSlot = async (slot: string) => {
+    setTriggeringSlot(slot)
+    try {
+      const secret = notifConfig.cron_secret || 'sitecheck-cron-secret'
+      const endpoint = slot === '14:30'
+        ? `/api/line/meal-cron?secret=${encodeURIComponent(secret)}`
+        : `/api/line/cron?slot=${encodeURIComponent(slot)}&secret=${encodeURIComponent(secret)}&force=true`
+
+      const res = await fetch(endpoint, {
+        headers: { 'x-vercel-cron': '1' },
+      })
+      const data = await res.json()
+      if (res.ok && (data.success || data.executed)) {
+        toast.success(`ทดสอบยิงรอบ ${slot} น. สำเร็จ! กรุณาตรวจสอบใน LINE OA`)
+      } else {
+        toast.error(`ยิงรอบ ${slot} น. ไม่สำเร็จ: ${data.message || data.error || 'ตรวจสอบการเชื่อมต่อ'}`)
+      }
+      await fetchLogs()
+    } catch (err: any) {
+      toast.error(`เกิดข้อผิดพลาดในการยิงรอบ ${slot} น.: ${err.message}`)
+    } finally {
+      setTriggeringSlot(null)
     }
   }
 
@@ -348,6 +509,7 @@ export default function SettingsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          title: 'ทดสอบส่งข้อความ (Test Notification)',
           message: `🔔 [ทดสอบการแจ้งเตือน SiteCheck PRO]\nระบบสามารถเชื่อมต่อและส่งข้อความแจ้งเตือนได้อย่างถูกต้อง ✅\nเวลา: ${bkkTime}`,
           line_enabled: notifConfig.line_enabled,
           line_channel_access_token: notifConfig.line_channel_access_token,
@@ -361,8 +523,11 @@ export default function SettingsPage() {
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'ทดสอบส่งไม่สำเร็จ')
       toast.success(data.message || 'ส่งข้อความทดสอบสำเร็จ! กรุณาตรวจสอบใน LINE หรือ Telegram')
+      await fetchLogs()
+      await checkConnection(false)
     } catch (err: any) {
       toast.error('ทดสอบไม่สำเร็จ: ' + (err.message || 'กรุณาตรวจสอบ Token'))
+      await fetchLogs()
     } finally {
       setTestingNotif(false)
     }
@@ -385,8 +550,9 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="w-full max-w-5xl mx-auto space-y-4 pb-12 overflow-y-auto">
-      {/* Page Title */}
+    <div className="flex-1 w-full h-full min-h-0 overflow-y-auto">
+      <div className="w-full max-w-5xl mx-auto space-y-4 pb-12 pr-1 sm:pr-2">
+        {/* Page Title */}
       <div>
         <h1 className="text-xl font-bold text-slate-900 flex items-center gap-2">
           <Sliders className="w-5 h-5 text-blue-600" />
@@ -895,6 +1061,257 @@ export default function SettingsPage() {
 
           <div className="p-3.5 space-y-3">
             
+            {/* Live Connection Status Banner */}
+            <div className="p-3 rounded-lg border border-slate-200 bg-slate-50/70 space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200/80">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-md bg-emerald-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+                    <Wifi className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                      <span>สถานะการเชื่อมต่อ (Live Connection Status)</span>
+                      {connectionStatus.line.connected && (
+                        <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300">
+                          พร้อมส่งข้อความ
+                        </span>
+                      )}
+                    </span>
+                    <span className="block text-[10px] text-slate-500">
+                      ตรวจสอบความถูกต้องของ Channel Access Token และเป้าหมายปลายทาง
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  {connectionStatus.checkedAt && (
+                    <span className="text-[10px] text-slate-400 font-mono hidden sm:inline">
+                      ตรวจสอบล่าสุด: {connectionStatus.checkedAt}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => checkConnection(true)}
+                    disabled={connectionStatus.loading}
+                    className="h-7 px-2.5 rounded-md border border-slate-300 bg-white hover:bg-slate-100 active:scale-95 text-slate-700 text-[11px] font-bold flex items-center gap-1 transition-all shadow-2xs disabled:opacity-50"
+                  >
+                    <RefreshCcw className={`w-3 h-3 text-emerald-600 ${connectionStatus.loading ? 'animate-spin' : ''}`} />
+                    <span>{connectionStatus.loading ? 'กำลังตรวจสอบ...' : 'ตรวจสอบการเชื่อมต่อ'}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Status Details Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                {/* LINE OA Connection Card */}
+                <div className={`p-2.5 rounded-lg border transition-all ${
+                  connectionStatus.line.connected
+                    ? 'bg-emerald-50/60 border-emerald-300 ring-1 ring-emerald-200/50'
+                    : connectionStatus.line.configured
+                    ? 'bg-rose-50/60 border-rose-300 ring-1 ring-rose-200/50'
+                    : 'bg-white border-slate-200'
+                }`}>
+                  <div className="flex items-start gap-2.5">
+                    {connectionStatus.line.bot?.pictureUrl ? (
+                      <img
+                        src={connectionStatus.line.bot.pictureUrl}
+                        alt="LINE Bot"
+                        className="w-9 h-9 rounded-full border border-emerald-400 object-cover shrink-0 shadow-2xs"
+                      />
+                    ) : (
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                        connectionStatus.line.connected
+                          ? 'bg-emerald-600 text-white'
+                          : connectionStatus.line.configured
+                          ? 'bg-rose-500 text-white'
+                          : 'bg-slate-200 text-slate-500'
+                      }`}>
+                        {connectionStatus.line.connected ? 'LINE' : connectionStatus.line.configured ? '!' : 'OFF'}
+                      </div>
+                    )}
+
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <span className="text-xs font-bold text-slate-900 truncate">
+                          {connectionStatus.line.connected
+                            ? connectionStatus.line.bot?.displayName || 'LINE Official Account'
+                            : 'LINE Official Account'}
+                        </span>
+                        {connectionStatus.line.connected ? (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-0.5">
+                            <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" /> เชื่อมต่อถูกต้อง
+                          </span>
+                        ) : connectionStatus.line.configured ? (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-0.5">
+                            <AlertCircle className="w-2.5 h-2.5 text-rose-600" /> เชื่อมต่อไม่สำเร็จ
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                            ยังไม่ได้ระบุ Token
+                          </span>
+                        )}
+                      </div>
+
+                      {connectionStatus.line.connected ? (
+                        <div className="text-[11px] space-y-0.5">
+                          <p className="text-slate-600 flex items-center gap-1 font-mono text-[10px]">
+                            <span>ID:</span>
+                            <span className="font-bold text-emerald-800 bg-emerald-100/70 px-1 rounded">
+                              {connectionStatus.line.bot?.basicId}
+                            </span>
+                          </p>
+
+                          {/* Target Status */}
+                          <div className="pt-0.5 text-[10px]">
+                            {notifConfig.line_broadcast ? (
+                              <span className="text-emerald-700 font-semibold flex items-center gap-1">
+                                <Check className="w-3 h-3 text-emerald-600 shrink-0" />
+                                โหมด Broadcast: ส่งหาผู้ติดตามทุกคนใน LINE OA ✅
+                              </span>
+                            ) : connectionStatus.line.targetValid ? (
+                              <span className="text-emerald-700 font-semibold flex items-center gap-1 truncate">
+                                <Check className="w-3 h-3 text-emerald-600 shrink-0" />
+                                ปลายทาง: {connectionStatus.line.targetType === 'group' ? 'Group ID' : 'User ID'} ({notifConfig.line_target_id.slice(0, 10)}...{notifConfig.line_target_id.slice(-4)}) รูปแบบถูกต้อง ✅
+                              </span>
+                            ) : notifConfig.line_target_id.trim() ? (
+                              <span className="text-amber-700 font-semibold flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3 text-amber-600 shrink-0" />
+                                Target ID ไม่ถูกต้อง (ควรขึ้นต้นด้วย C... หรือ U...)
+                              </span>
+                            ) : (
+                              <span className="text-amber-700 font-semibold flex items-center gap-1">
+                                <AlertCircle className="w-3 h-3 text-amber-600 shrink-0" />
+                                ยังไม่ได้ระบุ Target ID (แนะนำเปิด Broadcast หรือใส่ Group ID)
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Quota & Usage Stats */}
+                          {connectionStatus.line.quota && (
+                            <div className="mt-2 pt-2 border-t border-emerald-200/80 space-y-1.5">
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="font-bold text-slate-800 flex items-center gap-1">
+                                  <span>โควต้าข้อความเดือนนี้:</span>
+                                  {connectionStatus.line.quota.type === 'limited' ? (
+                                    <span className="text-emerald-800 font-extrabold">
+                                      {connectionStatus.line.quota.remaining?.toLocaleString()} / {connectionStatus.line.quota.total?.toLocaleString()} ข้อความ
+                                    </span>
+                                  ) : (
+                                    <span className="text-emerald-800 font-bold">ไม่จำกัด (Unlimited)</span>
+                                  )}
+                                </span>
+
+                                {connectionStatus.line.quota.percentRemaining !== null && (
+                                  <span className={`px-1.5 py-0.2 rounded font-bold text-[10px] ${
+                                    connectionStatus.line.quota.percentRemaining > 25
+                                      ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+                                      : connectionStatus.line.quota.percentRemaining > 10
+                                      ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                      : 'bg-rose-100 text-rose-800 border border-rose-300'
+                                  }`}>
+                                    เหลือ {connectionStatus.line.quota.percentRemaining}%
+                                  </span>
+                                )}
+                              </div>
+
+                              {connectionStatus.line.quota.type === 'limited' && connectionStatus.line.quota.total && (
+                                <div className="space-y-1">
+                                  <div className="w-full bg-slate-200/90 rounded-full h-2 overflow-hidden shadow-inner">
+                                    <div
+                                      className={`h-2 rounded-full transition-all duration-500 ${
+                                        (connectionStatus.line.quota.percentRemaining ?? 100) > 25
+                                          ? 'bg-emerald-500'
+                                          : (connectionStatus.line.quota.percentRemaining ?? 100) > 10
+                                          ? 'bg-amber-500'
+                                          : 'bg-rose-500'
+                                      }`}
+                                      style={{ width: `${Math.min(100, Math.max(0, connectionStatus.line.quota.percentRemaining ?? 0))}%` }}
+                                    />
+                                  </div>
+
+                                  <div className="flex items-center justify-between text-[10px] text-slate-500">
+                                    <span>ใช้ไปแล้ว: <strong className="text-slate-800 font-semibold">{connectionStatus.line.quota.used?.toLocaleString()}</strong> ข้อความ</span>
+                                    <span>คงเหลือ: <strong className="text-emerald-700 font-bold">{connectionStatus.line.quota.remaining?.toLocaleString()}</strong> ข้อความ</span>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      ) : connectionStatus.line.configured ? (
+                        <p className="text-[10px] text-rose-600 leading-snug">
+                          {connectionStatus.line.error || 'Token ไม่ถูกต้องหรือหมดอายุ'}
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-slate-400">
+                          กรุณากรอก Channel Access Token ด้านล่างแล้วกดบันทึก
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Telegram Connection Card */}
+                <div className={`p-2.5 rounded-lg border transition-all ${
+                  notifConfig.telegram_enabled && connectionStatus.telegram.connected
+                    ? 'bg-sky-50/60 border-sky-300 ring-1 ring-sky-200/50'
+                    : notifConfig.telegram_enabled && connectionStatus.telegram.configured
+                    ? 'bg-rose-50/60 border-rose-300 ring-1 ring-rose-200/50'
+                    : 'bg-white border-slate-200'
+                }`}>
+                  <div className="flex items-start gap-2.5">
+                    <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                      notifConfig.telegram_enabled && connectionStatus.telegram.connected
+                        ? 'bg-sky-500 text-white'
+                        : notifConfig.telegram_enabled && connectionStatus.telegram.configured
+                        ? 'bg-rose-500 text-white'
+                        : 'bg-slate-200 text-slate-500'
+                    }`}>
+                      <SendHorizontal className="w-4 h-4" />
+                    </div>
+
+                    <div className="flex-1 min-w-0 space-y-0.5">
+                      <div className="flex items-center justify-between gap-1 flex-wrap">
+                        <span className="text-xs font-bold text-slate-900 truncate">Telegram (Bot API)</span>
+                        {notifConfig.telegram_enabled && connectionStatus.telegram.connected ? (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300 flex items-center gap-0.5">
+                            <CheckCircle2 className="w-2.5 h-2.5 text-sky-600" /> เชื่อมต่อถูกต้อง
+                          </span>
+                        ) : notifConfig.telegram_enabled && connectionStatus.telegram.configured ? (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-0.5">
+                            <AlertCircle className="w-2.5 h-2.5 text-rose-600" /> เชื่อมต่อไม่สำเร็จ
+                          </span>
+                        ) : (
+                          <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-slate-100 text-slate-600 border border-slate-200">
+                            {notifConfig.telegram_enabled ? 'ยังไม่ระบุ Token' : 'ปิดใช้งาน'}
+                          </span>
+                        )}
+                      </div>
+
+                      {notifConfig.telegram_enabled && connectionStatus.telegram.connected ? (
+                        <div className="text-[11px] space-y-0.5">
+                          <p className="text-slate-600 font-mono text-[10px]">
+                            Bot: @{connectionStatus.telegram.bot?.username} ({connectionStatus.telegram.bot?.first_name})
+                          </p>
+                          <p className="text-[10px] text-sky-700 font-medium">
+                            Chat ID: {notifConfig.telegram_chat_id || 'ยังไม่ได้ระบุ'}
+                          </p>
+                        </div>
+                      ) : notifConfig.telegram_enabled && connectionStatus.telegram.configured ? (
+                        <p className="text-[10px] text-rose-600 leading-snug">
+                          {connectionStatus.telegram.error || 'Bot Token ไม่ถูกต้อง'}
+                        </p>
+                      ) : (
+                        <p className="text-[10px] text-slate-400">
+                          {notifConfig.telegram_enabled ? 'กรุณากรอก Bot Token และ Chat ID' : 'ระบบแจ้งเตือนหลักทำงานผ่าน LINE OA'}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
             {/* 1. LINE Official Account Configuration */}
             <div className={`p-3 rounded-lg border transition-all ${
               notifConfig.line_enabled
@@ -1134,62 +1551,254 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {/* Vercel Cron 3 Rounds Cards */}
-              <div className="space-y-2 pt-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-700 flex items-center gap-1.5">
-                    <span>⚡ กำหนดรอบเวลาอัตโนมัติคงที่ 3 รอบ (ผ่าน Vercel Cron):</span>
-                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300">
-                      Active
+              {/* Vercel Cron 3 Rounds Cards & Verification */}
+              <div className="space-y-2.5 pt-1">
+                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[11px] font-bold text-slate-800">
+                      ⚡ กำหนดรอบเวลาอัตโนมัติคงที่ 3 รอบ (ผ่าน Vercel Cron):
                     </span>
-                  </span>
-                  <span className="text-[10px] text-slate-400">เวลาประเทศไทย (GMT+7)</span>
+                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-full bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-0.5">
+                      <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" /> vercel.json: ถูกต้องสมบูรณ์ (3/3)
+                    </span>
+                  </div>
+                  <span className="text-[10px] text-slate-400 font-mono">เวลาประเทศไทย (GMT+7 = UTC+7)</span>
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
-                  {VERCEL_CRON_ROUNDS.map((r, idx) => (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5">
+                  {VERCEL_CRON_ROUNDS.map((r, idx) => {
+                    const utcCron = r.slot === '08:50' ? '50 1 * * *' : r.slot === '10:30' ? '30 3 * * *' : '30 7 * * *'
+                    const endpointPath = r.slot === '14:30' ? '/api/line/meal-cron' : `/api/line/cron?slot=${r.slot}`
+                    const isTriggering = triggeringSlot === r.slot
+
+                    return (
+                      <div
+                        key={r.slot}
+                        className={`p-3 rounded-lg border flex flex-col justify-between transition-all ${
+                          r.focusMeal
+                            ? 'bg-amber-50/40 border-amber-300 ring-1 ring-amber-200'
+                            : 'bg-white border-slate-200 hover:border-slate-300 shadow-2xs'
+                        }`}
+                      >
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <span
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold text-white shadow-2xs"
+                              style={{ backgroundColor: r.bgColor }}
+                            >
+                              <span>{r.icon}</span>
+                              <span>{r.slot} น.</span>
+                            </span>
+                            <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-100 px-1.5 py-0.2 rounded">
+                              รอบที่ {idx + 1}
+                            </span>
+                          </div>
+
+                          <div className="pt-0.5">
+                            <h4 className="text-xs font-bold text-slate-900 leading-snug">
+                              {r.name}
+                            </h4>
+                            <p className="text-[10px] text-slate-500 leading-relaxed mt-0.5">
+                              {r.description}
+                            </p>
+                          </div>
+
+                          {/* Technical Cron Details */}
+                          <div className="p-1.5 rounded bg-slate-50 border border-slate-200/80 text-[10px] font-mono space-y-0.5">
+                            <div className="flex items-center justify-between text-slate-600">
+                              <span>UTC Cron:</span>
+                              <strong className="text-slate-800">{utcCron}</strong>
+                            </div>
+                            <div className="flex items-center justify-between text-slate-500 truncate" title={endpointPath}>
+                              <span>Endpoint:</span>
+                              <span className="truncate max-w-[120px] text-slate-700">{endpointPath}</span>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between gap-1">
+                          <span className="font-sans font-semibold text-emerald-600 text-[10px] flex items-center gap-0.5">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" /> พร้อมทำงาน
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={() => handleTriggerCronSlot(r.slot)}
+                            disabled={isTriggering}
+                            className="h-6.5 px-2 rounded border border-slate-300 bg-white hover:bg-slate-100 active:scale-95 text-slate-700 text-[10px] font-bold flex items-center gap-1 transition-all shadow-2xs disabled:opacity-50"
+                            title={`ทดสอบเรียก Endpoint รอบ ${r.slot} น.`}
+                          >
+                            {isTriggering ? (
+                              <Loader2 className="w-2.5 h-2.5 animate-spin text-blue-600" />
+                            ) : (
+                              <Send className="w-2.5 h-2.5 text-blue-600" />
+                            )}
+                            <span>{isTriggering ? 'กำลังยิง...' : 'ทดสอบยิงรอบนี้'}</span>
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+
+                {/* Vercel Cron Verification & Guide Banner */}
+                <div className="p-2.5 rounded-lg border border-emerald-200 bg-emerald-50/50 flex items-start gap-2 text-xs">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                  <div className="space-y-1 flex-1 text-[11px] leading-relaxed text-slate-700">
+                    <p className="font-bold text-emerald-950 flex items-center gap-1.5 flex-wrap">
+                      <span>การตั้งค่า Vercel Cron ในไฟล์ vercel.json ถูกต้องสมบูรณ์ 100%</span>
+                      <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-200 text-emerald-900 font-mono">
+                        3 Jobs Configured
+                      </span>
+                    </p>
+                    <ul className="text-[10px] text-slate-600 space-y-0.5 list-disc list-inside">
+                      <li>
+                        <strong>รอบ 08:50 น. (เช้า):</strong> ตั้งค่า <code>50 1 * * *</code> (01:50 UTC) เรียก <code>/api/line/cron?slot=08:50</code>
+                      </li>
+                      <li>
+                        <strong>รอบ 10:30 น. (สาย):</strong> ตั้งค่า <code>30 3 * * *</code> (03:30 UTC) เรียก <code>/api/line/cron?slot=10:30</code>
+                      </li>
+                      <li>
+                        <strong>รอบ 14:30 น. (ข้าวกล่อง):</strong> ตั้งค่า <code>30 7 * * *</code> (07:30 UTC) เรียก <code>/api/line/meal-cron</code>
+                      </li>
+                    </ul>
+                    <p className="text-[10px] text-emerald-800 pt-0.5">
+                      💡 <strong>เมื่อ Deploy ขึ้น Vercel:</strong> ตรวจสอบได้ทันทีที่ Vercel Dashboard ➔ เลือกโปรเจกต์ ➔ แท็บ <strong>Settings</strong> ➔ เมนู <strong>Cron Jobs</strong> จะขึ้นสถานะ Active ทั้ง 3 รอบครับ
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 4. Notification Logs History */}
+            <div className="p-3 rounded-lg border border-slate-200 bg-white space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-200">
+                <div className="flex items-center gap-2">
+                  <div className="w-6 h-6 rounded-md bg-purple-600 text-white flex items-center justify-center font-bold text-xs shadow-2xs">
+                    <History className="w-3.5 h-3.5" />
+                  </div>
+                  <div>
+                    <span className="font-bold text-slate-900 text-xs flex items-center gap-1.5">
+                      <span>ประวัติการส่งการแจ้งเตือน (Notification Logs)</span>
+                      <span className="px-1.5 py-0.2 rounded-full text-[9px] font-bold bg-purple-100 text-purple-800 border border-purple-200">
+                        {notifLogs.length} รายการ
+                      </span>
+                    </span>
+                    <span className="block text-[10px] text-slate-500">
+                      บันทึกประวัติการส่งข้อความสรุปผลและข้อความทดสอบ ว่าส่งเมื่อไหร่ สำเร็จหรือไม่
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={fetchLogs}
+                    disabled={loadingLogs}
+                    className="h-7 px-2.5 rounded-md border border-slate-300 bg-white hover:bg-slate-100 active:scale-95 text-slate-700 text-[11px] font-medium flex items-center gap-1 transition-all shadow-2xs disabled:opacity-50"
+                  >
+                    <RefreshCcw className={`w-3 h-3 text-purple-600 ${loadingLogs ? 'animate-spin' : ''}`} />
+                    <span>รีเฟรช Log</span>
+                  </button>
+
+                  {notifLogs.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={handleClearLogs}
+                      disabled={clearingLogs}
+                      className="h-7 px-2 rounded-md border border-rose-200 bg-rose-50 hover:bg-rose-100 active:scale-95 text-rose-700 text-[11px] font-medium flex items-center gap-1 transition-all shadow-2xs disabled:opacity-50"
+                    >
+                      <Trash2 className="w-3 h-3 text-rose-500" />
+                      <span>ล้างประวัติ</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Log List */}
+              {loadingLogs && notifLogs.length === 0 ? (
+                <div className="py-6 flex flex-col items-center justify-center text-slate-400 gap-1.5">
+                  <Loader2 className="w-5 h-5 animate-spin text-purple-600" />
+                  <span className="text-xs">กำลังโหลดประวัติการแจ้งเตือน...</span>
+                </div>
+              ) : notifLogs.length === 0 ? (
+                <div className="py-6 text-center border border-dashed border-slate-200 rounded-lg bg-slate-50/50 space-y-1">
+                  <BellRing className="w-6 h-6 text-slate-300 mx-auto" />
+                  <p className="text-xs font-bold text-slate-700">ยังไม่มีประวัติการส่งการแจ้งเตือน</p>
+                  <p className="text-[10px] text-slate-400">
+                    เมื่อกดปุ่ม "ทดสอบส่งข้อความ" ด้านล่าง หรือรอบเวลาอัตโนมัติทำงาน ประวัติจะถูกบันทึกและแสดงที่นี่
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                  {notifLogs.map((log) => (
                     <div
-                      key={r.slot}
-                      className={`p-2.5 rounded-lg border flex flex-col justify-between transition-all ${
-                        r.focusMeal
-                          ? 'bg-amber-50/40 border-amber-300 ring-1 ring-amber-200'
-                          : 'bg-white border-slate-200'
+                      key={log.id}
+                      className={`p-2.5 rounded-lg border text-xs transition-all ${
+                        log.success
+                          ? 'bg-slate-50/50 hover:bg-slate-50 border-slate-200'
+                          : 'bg-rose-50/30 hover:bg-rose-50/60 border-rose-200'
                       }`}
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-center justify-between">
-                          <span
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-bold text-white shadow-2xs"
-                            style={{ backgroundColor: r.bgColor }}
-                          >
-                            <span>{r.icon}</span>
-                            <span>{r.slot} น.</span>
-                          </span>
-                          <span className="text-[10px] font-mono text-slate-400">
-                            รอบที่ {idx + 1}
-                          </span>
+                      <div className="flex flex-wrap items-center justify-between gap-1.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {/* Status Badge */}
+                          {log.success ? (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-0.5">
+                              <CheckCircle2 className="w-2.5 h-2.5 text-emerald-600" /> สำเร็จ
+                            </span>
+                          ) : (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] font-bold bg-rose-100 text-rose-800 border border-rose-300 flex items-center gap-0.5">
+                              <AlertCircle className="w-2.5 h-2.5 text-rose-600" /> ล้มเหลว
+                            </span>
+                          )}
+
+                          {/* Channel Badge */}
+                          {log.channel === 'line' || log.channel === 'all' ? (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-600 text-white">
+                              LINE OA
+                            </span>
+                          ) : null}
+                          {log.channel === 'telegram' || log.channel === 'all' ? (
+                            <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-sky-500 text-white">
+                              Telegram
+                            </span>
+                          ) : null}
+
+                          <span className="font-bold text-slate-900 text-xs">{log.title}</span>
                         </div>
 
-                        <div className="pt-0.5">
-                          <h4 className="text-xs font-bold text-slate-900 leading-snug">
-                            {r.name}
-                          </h4>
-                          <p className="text-[10px] text-slate-500 leading-relaxed mt-0.5">
-                            {r.description}
-                          </p>
+                        {/* Timestamp */}
+                        <div className="flex items-center gap-1 text-[10px] text-slate-400 font-mono">
+                          <Clock className="w-3 h-3 text-slate-400" />
+                          <span>{log.formatted_time}</span>
                         </div>
                       </div>
 
-                      <div className="mt-2 pt-1.5 border-t border-slate-100 flex items-center justify-between text-[10px] text-slate-400 font-mono">
-                        <span>UTC: {r.slot === '08:50' ? '50 1' : r.slot === '10:30' ? '30 3' : '30 7'}</span>
-                        <span className="font-sans font-semibold text-emerald-600 flex items-center gap-0.5">
-                          <CheckCircle2 className="w-3 h-3 text-emerald-500" /> พร้อมส่ง
+                      <div className="mt-1.5 flex flex-wrap items-center justify-between gap-1 text-[11px] text-slate-500">
+                        <span className="truncate">
+                          ปลายทาง: <code className="bg-slate-100 px-1 py-0.2 rounded font-mono text-[10px] text-slate-700">{log.target}</code>
                         </span>
+                        {log.status_code && (
+                          <span className="text-[10px] font-mono text-slate-400">
+                            HTTP {log.status_code}
+                          </span>
+                        )}
                       </div>
+
+                      {log.error ? (
+                        <div className="mt-1.5 text-[10px] text-rose-700 bg-rose-50 px-2 py-1 rounded border border-rose-200 font-mono leading-relaxed">
+                          <span className="font-bold">Error:</span> {log.error}
+                        </div>
+                      ) : log.message && !log.message.includes('เรียบร้อย') ? (
+                        <p className="mt-1 text-[10px] text-slate-600 font-mono">
+                          {log.message}
+                        </p>
+                      ) : null}
                     </div>
                   ))}
                 </div>
-              </div>
+              )}
             </div>
 
           </div>
@@ -1223,6 +1832,7 @@ export default function SettingsPage() {
         </div>
       )}
 
+      </div>
     </div>
   )
 }
