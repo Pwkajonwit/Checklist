@@ -10,7 +10,7 @@
     },
     {
       "path": "/api/line/meal-cron?secret=sitecheck-cron-secret",
-      "schedule": "30 7 * * *"
+      "schedule": "30 9 * * *"
     }
   ]
 }
